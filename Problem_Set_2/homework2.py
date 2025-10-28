@@ -16,11 +16,17 @@ def gradient_x(img):
     # should we conduct some pre-processing to remove noise? which kernel should we apply?
     # which kernel should we choose to calculate gradient_x?
     # TODO
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2Gray)
+    gaussian = cv2.GaussianBlur(gray, (3, 3), 0)
+    grad_x = cv2.Sobel(gaussian, cv2.CV_32F, 1, 0, ksize=3)
     return grad_x
 
 
 def gradient_y(img):
     # TODO
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2Gray)
+    gaussian = cv2.GaussianBlur(gray, (3, 3), 0)
+    grad_y = cv2.Sobel(gaussian, cv2.CV_32F, 0, 1, ksize=3)
     return grad_y
 
 
@@ -31,7 +37,21 @@ def harris_response(img, alpha, win_size):
     # remember to smooth the gradients.
     # Avoid using too much "for" loops to speed up.
     # TODO
-    print(img.shape)
+    grad_x = gradient_x(img)
+    grad_y = gradient_y(img)
+    Ixx = grad_x**2
+    Iyy = grad_y**2
+    Ixy = grad_x * grad_y
+
+    # 课件上为了简化运算，把窗口中每个元素的权重统一设置为 1，此处使用高斯核作为权重来改进算法
+    # 并且使用 cv2.GaussianBlur() 可以避免 for 循环
+    A = cv2.GaussianBlur(Ixx, (win_size, win_size), 0)
+    B = cv2.GaussianBlur(Iyy, (win_size, win_size), 0)
+    C = cv2.GaussianBlur(Ixy, (win_size, win_size), 0)
+
+    det = A * B - C**2
+    trace = A + B
+    R = det - alpha * trace**2
 
     return R
 
@@ -42,6 +62,15 @@ def corner_selection(R, thresh, min_dist):
     #   use ndimage.maximum_filter() to achieve non-maximum suppression
     #   set those which aren’t **local maximum** to zero.
     # TODO
+    height, width = R.shape
+    R_max = ndimage.maximum_filter(R, size=min_dist, mode="reflect")
+
+    pix = []
+    for u in range(height):
+        for v in range(width):
+            if R[u, v] > thresh and R[u, v] == R_max[u, v]:
+                pix.append((u, v))
+
     return pix
 
 
