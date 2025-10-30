@@ -5,6 +5,7 @@ from scipy import ndimage, spatial
 import cv2
 from os import listdir
 import matplotlib.pyplot as plt
+import random
 
 EPS = 1e-5
 IMGDIR = "Problem2Images"
@@ -151,11 +152,11 @@ def feature_matching(img_1, img_2):
     R1 = harris_response(img_1, 0.04, 9)
     R2 = harris_response(img_2, 0.04, 9)
     cor1 = corner_selection(R1, 0.01 * np.max(R1), 5)
-    cor2 = corner_selection(R2, 0.01 * np.max(R1), 5)
+    cor2 = corner_selection(R2, 0.01 * np.max(R2), 5)
     fea1 = histogram_of_gradients(img_1, cor1)
     fea2 = histogram_of_gradients(img_2, cor2)
     dis = spatial.distance.cdist(fea1, fea2, metric="euclidean")
-    threshold = 0.6
+    threshold = 0.7
     pixels_1 = []
     pixels_2 = []
     p1, p2 = np.shape(dis)
@@ -185,8 +186,8 @@ def feature_matching(img_1, img_2):
 
 
 def test_matching():
-    img_1 = cv2.imread(f"{IMGDIR}/1_1.jpg")
-    img_2 = cv2.imread(f"{IMGDIR}/1_2.jpg")
+    img_1 = cv2.imread(f"{IMGDIR}/3_1.jpg")
+    img_2 = cv2.imread(f"{IMGDIR}/3_2.jpg")
 
     img_gray_1 = cv2.cvtColor(img_1, cv2.COLOR_BGR2GRAY)
     img_gray_2 = cv2.cvtColor(img_2, cv2.COLOR_BGR2GRAY)
@@ -221,6 +222,16 @@ def compute_homography(pixels_1, pixels_2):
     # consider how to form matrix A for U, S, V = np.linalg.svd((np.transpose(A)).dot(A))
     # homo_matrix = np.reshape(V[np.argmin(S)], (3, 3))
     # TODO
+    M = []
+    for (x1, y1), (x2, y2) in zip(pixels_1, pixels_2):
+        M.append([x1, y1, 1, 0, 0, 0, -x1 * x2, -y1 * x2, -x2])
+        M.append([0, 0, 0, x1, y1, 1, -x1 * y2, -y1 * y2, -y2])
+
+    M = np.array(M)
+
+    # SVD
+    U, S, V = np.linalg.svd((np.transpose(M)).dot(M))
+    homo_matrix = np.reshape(V[np.argmin(S)], (3, 3))
     return homo_matrix
 
 
@@ -229,10 +240,54 @@ def align_pair(pixels_1, pixels_2):
     # and \verb|compute_homography| to calulate homo_matrix
     # implement RANSAC to compute the optimal alignment.
     # you can refer to implementations online.
-    return est_homo
+    """
+    input:
+        pixels_1, pixels_2 (list: N): list of tuples (u, v) = (row, col)
+    output:
+        est_homo (np.array(3, 3)): optimal homography matrix
+    """
+    max_inliers = []
+    best_homo = None
+    iterations = 500
+    threshold = 5.0
+
+    # 原始的 corner_selection 返回 (u, v) 即 (row, col)
+    # compute_homography 期望 (x, y) 即 (col, row)
+    # 因此这里将 (u, v) 转换为 (x, y) = (v, u)
+    pixels_1_xy = [[y, x] for x, y in pixels_1]
+    pixels_2_xy = [[y, x] for x, y in pixels_2]
+
+    homo_pixels_1 = np.hstack((np.array(pixels_1_xy), np.ones((len(pixels_1_xy), 1))))
+    # homo_pixels_2 = np.hstack((np.array(pixels_2_xy), np.ones((len(pixels_2_xy), 1))))
+
+    # RANSAC
+    for _ in range(iterations):
+        idx = np.random.choice(len(pixels_1_xy), 4, replace=False)
+        choose_1 = np.array([pixels_1_xy[i] for i in idx])
+        choose_2 = np.array([pixels_2_xy[i] for i in idx])
+
+        now_homo = compute_homography(choose_1, choose_2)
+
+        trans_pixels_1 = np.dot(now_homo, homo_pixels_1.T).T
+        trans_pixels_1 = trans_pixels_1[:, :2] / (trans_pixels_1[:, 2, None] + EPS)
+
+        distances = np.linalg.norm(trans_pixels_1 - np.array(pixels_2_xy), axis=1)
+        inliers = np.where(distances < threshold)[0]
+
+        if len(inliers) > len(max_inliers):
+            max_inliers = inliers
+            best_homo = now_homo
+
+    # (改进) RANSAC 优化：使用所有内点重新计算 H 矩阵
+    if len(max_inliers) > 4:  # 至少需要 4 个点
+        inlier_pixels_1 = np.array(pixels_1_xy)[max_inliers]
+        inlier_pixels_2 = np.array(pixels_2_xy)[max_inliers]
+        best_homo = compute_homography(inlier_pixels_1, inlier_pixels_2)
+
+    return best_homo
 
 
-def stitch_blend(img_1, img_2, est_homo):
+def stitch_blend(img_1, img_2, best_homo, mode="alpha"):
     # hint:
     # First, project four corner pixels with estimated homo-matrix
     # and converting them back to Cartesian coordinates after normalization.
@@ -240,61 +295,195 @@ def stitch_blend(img_1, img_2, est_homo):
     # Then, remap both image to new image plane and blend two images using Alpha Blending.
     h1, w1, d1 = np.shape(img_1)  # d=3 RGB
     h2, w2, d2 = np.shape(img_2)
-    p1 = est_homo.dot(np.array([0, 0, 1]))
-    p2 = est_homo.dot(np.array([0, h1, 1]))
-    p3 = est_homo.dot(np.array([w1, 0, 1]))
-    p4 = est_homo.dot(np.array([w1, h1, 1]))
-    p1 = np.int16(p1 / p1[2])
-    p2 = np.int16(p2 / p2[2])
-    p3 = np.int16(p3 / p3[2])
-    p4 = np.int16(p4 / p4[2])
+
+    # p1 = best_homo.dot(np.array([0, 0, 1]))
+    # p2 = best_homo.dot(np.array([0, h1, 1]))
+    # p3 = best_homo.dot(np.array([w1, 0, 1]))
+    # p4 = best_homo.dot(np.array([w1, h1, 1]))
+
+    # 改进：使用图像的准确角点 (0, 0), (w-1, 0), (0, h-1), (w-1, h-1)
+    p1 = best_homo.dot(np.array([0, 0, 1]))
+    p2 = best_homo.dot(np.array([w1 - 1, 0, 1]))
+    p3 = best_homo.dot(np.array([0, h1 - 1, 1]))
+    p4 = best_homo.dot(np.array([w1 - 1, h1 - 1, 1]))
+
+    # 归一化
+    p1 = p1 / (p1[2] + EPS)
+    p2 = p2 / (p2[2] + EPS)
+    p3 = p3 / (p3[2] + EPS)
+    p4 = p4 / (p4[2] + EPS)
+
+    # p1 = np.int16(p1 / p1[2])
+    # p2 = np.int16(p2 / p2[2])
+    # p3 = np.int16(p3 / p3[2])
+    # p4 = np.int16(p4 / p4[2])
+
+    # 改进：使用 round 四舍五入，而不是 int16 直接截断
+    p1 = np.round(p1).astype(np.int16)
+    p2 = np.round(p2).astype(np.int16)
+    p3 = np.round(p3).astype(np.int16)
+    p4 = np.round(p4).astype(np.int16)
+
     x_min = min(0, p1[0], p2[0], p3[0], p4[0])
-    x_max = max(w2, p1[0], p2[0], p3[0], p4[0])
+    x_max = max(w2 - 1, p1[0], p2[0], p3[0], p4[0])  # 改进：w2 -> w2-1
     y_min = min(0, p1[1], p2[1], p3[1], p4[1])
-    y_max = max(h2, p1[1], p2[1], p3[1], p4[1])
+    y_max = max(h2 - 1, p1[1], p2[1], p3[1], p4[1])  # 改进：h2 -> h2-1
+
     x_range = np.arange(x_min, x_max + 1, 1)
     y_range = np.arange(y_min, y_max + 1, 1)
     x, y = np.meshgrid(x_range, y_range)
     x = np.float32(x)
     y = np.float32(y)
-    homo_inv = np.linalg.pinv(est_homo)
+
+    homo_inv = np.linalg.pinv(best_homo)
+
     trans_x = homo_inv[0, 0] * x + homo_inv[0, 1] * y + homo_inv[0, 2]
     trans_y = homo_inv[1, 0] * x + homo_inv[1, 1] * y + homo_inv[1, 2]
     trans_z = homo_inv[2, 0] * x + homo_inv[2, 1] * y + homo_inv[2, 2]
-    trans_x = trans_x / trans_z
-    trans_y = trans_y / trans_z
-    est_img_1 = cv2.remap(img_1, trans_x, trans_y, cv2.INTER_LINEAR)
-    est_img_2 = cv2.remap(img_2, x, y, cv2.INTER_LINEAR)
-    alpha1 = cv2.remap(np.ones(np.shape(img_1)), trans_x, trans_y, cv2.INTER_LINEAR)
-    alpha2 = cv2.remap(np.ones(np.shape(img_2)), x, y, cv2.INTER_LINEAR)
-    alpha = alpha1 + alpha2
-    alpha[alpha == 0] = 2
-    alpha1 = alpha1 / alpha
-    alpha2 = alpha2 / alpha
-    est_img = est_img_1 * alpha1 + est_img_2 * alpha2
-    return est_img
+
+    trans_x = trans_x / (trans_z + EPS)
+    trans_y = trans_y / (trans_z + EPS)
+
+    # 转换为 float32
+    trans_x = trans_x.astype(np.float32)
+    trans_y = trans_y.astype(np.float32)
+
+    # 改进：添加 borderMode=cv2.BORDER_CONSTANT，确保图像外为 0
+    best_img_1 = cv2.remap(
+        img_1,
+        trans_x,
+        trans_y,
+        cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(0, 0, 0),
+    )
+    best_img_2 = cv2.remap(
+        img_2,
+        x,
+        y,
+        cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(0, 0, 0),
+    )
+
+    if mode == "alpha":
+        # 原始代码
+        # alpha1 = cv2.remap(np.ones(np.shape(img_1)), trans_x, trans_y, cv2.INTER_LINEAR)
+        # alpha2 = cv2.remap(np.ones(np.shape(img_2)), x, y, cv2.INTER_LINEAR)
+
+        # 改进：使用 float32 并设置 borderMode
+        alpha1 = cv2.remap(
+            np.ones(img_1.shape, dtype=np.float32),
+            trans_x,
+            trans_y,
+            cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=(0, 0, 0),
+        )
+        alpha2 = cv2.remap(
+            np.ones(img_2.shape, dtype=np.float32),
+            x,
+            y,
+            cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=(0, 0, 0),
+        )
+
+        alpha = alpha1 + alpha2
+
+        # alpha[alpha == 0] = 2 # 原始代码
+        # 改进：使用 EPS 来处理除零
+        alpha_mask = alpha < EPS
+        alpha[alpha_mask] = 1.0  # 避免除零
+
+        alpha1 = alpha1 / alpha
+        alpha2 = alpha2 / alpha
+
+        # 设回 0，使得非图像区域的权重为 0
+        alpha1[alpha_mask] = 0.0
+        alpha2[alpha_mask] = 0.0
+
+        best_img = best_img_1 * alpha1 + best_img_2 * alpha2
+
+    elif mode == "linear":
+        # 找到两张图的非零区域 (x 坐标)
+        mask1 = np.sum(best_img_1, axis=2) > 0
+        mask2 = np.sum(best_img_2, axis=2) > 0
+
+        x1 = np.where(np.any(mask1, axis=0))[0]
+        x2 = np.where(np.any(mask2, axis=0))[0]
+
+        # 处理边缘情况
+        if len(x1) == 0 and len(x2) == 0:
+            return np.zeros_like(best_img_1)
+        elif len(x1) == 0:
+            return best_img_2
+        elif len(x2) == 0:
+            return best_img_1
+
+        xmin_1, xmax_1 = np.min(x1), np.max(x1)
+        xmin_2, xmax_2 = np.min(x2), np.max(x2)
+
+        best_img = np.zeros_like(best_img_1)
+
+        if xmin_1 > xmin_2:
+            # 确保 img_1 在左边
+            best_img_1, best_img_2 = best_img_2, best_img_1
+            xmin_1, xmin_2 = xmin_2, xmin_1
+            xmax_1, xmax_2 = xmax_2, xmax_1
+
+        overlap_start = xmin_2
+        overlap_end = xmax_1
+
+        len_overlap = overlap_end - overlap_start
+
+        # 无重叠或重叠为负
+        if len_overlap <= 0:
+            best_img = best_img_1 + best_img_2
+            return best_img
+
+        best_img[:, :overlap_start, :] = best_img_1[:, :overlap_start, :]
+        best_img[:, overlap_end:, :] = best_img_2[:, overlap_end:, :]
+
+        for i in range(overlap_start, overlap_end):
+            alpha = (i - overlap_start) / len_overlap  # 0 -> 1 for img2
+            beta = 1.0 - alpha  # 1 -> 0 for img1
+            best_img[:, i, :] = beta * best_img_1[:, i, :] + alpha * best_img_2[:, i, :]
+
+    return best_img
 
 
 def generate_panorama(ordered_img_seq):
-    len = np.shape(ordered_img_seq)[0]
-    mid = int(len / 2)  # middle anchor
+    lenth = len(ordered_img_seq)
+    mid = int(lenth / 2)
     i = mid - 1
     j = mid + 1
     principle_img = ordered_img_seq[mid]
-    while j < len:
+
+    while j < lenth:
+        # (img_1, img_2) -> (ordered_img_seq[j], principle_img)
+        # pixels1 来自 img_1, pixels2 来自 img_2
         pixels1, pixels2 = feature_matching(ordered_img_seq[j], principle_img)
         homo_matrix = align_pair(pixels1, pixels2)
+        # stitch_blend(img_1, img_2, best_homo)
+        # img_1 (j) 被变换到 img_2 (principle)
         principle_img = stitch_blend(ordered_img_seq[j], principle_img, homo_matrix)
         principle_img = np.uint8(principle_img)
         j = j + 1
+
     while i >= 0:
+        # (img_1, img_2) -> (ordered_img_seq[i], principle_img)
+        # pixels1 来自 img_1, pixels2 来自 img_2
         pixels1, pixels2 = feature_matching(ordered_img_seq[i], principle_img)
         homo_matrix = align_pair(pixels1, pixels2)
+        # stitch_blend(img_1, img_2, best_homo)
+        # img_1 (i) 被变换到 img_2 (principle)
         principle_img = stitch_blend(ordered_img_seq[i], principle_img, homo_matrix)
         principle_img = np.uint8(principle_img)
         i = i - 1
-    est_pano = principle_img
-    return est_pano
+
+    best_pano = principle_img
+    return best_pano
 
 
 if __name__ == "__main__":
@@ -303,12 +492,45 @@ if __name__ == "__main__":
     # save the generated image following the requirements
     test_matching()
 
+    img_1 = cv2.imread("Problem2Images/1_1.jpg")
+    img_2 = cv2.imread("Problem2Images/1_2.jpg")
+    img_3 = cv2.imread("Problem2Images/2_1.jpg")
+    img_4 = cv2.imread("Problem2Images/2_2.jpg")
+    img_5 = cv2.imread("Problem2Images/3_1.jpg")
+    img_6 = cv2.imread("Problem2Images/3_2.jpg")
+
+    img_list = []
+    img_list.append(img_1)
+    img_list.append(img_2)
+    pano = generate_panorama(img_list)
+    cv2.imwrite(f"outputs/blend_1.jpg", pano)
+
+    img_list = []
+    img_list.append(img_3)
+    img_list.append(img_4)
+    pano = generate_panorama(img_list)
+    cv2.imwrite(f"outputs/blend_2.jpg", pano)
+
+    img_list = []
+    img_list.append(img_5)
+    img_list.append(img_6)
+    pano = generate_panorama(img_list)
+    cv2.imwrite(f"outputs/blend_3.jpg", pano)
+
     # an example
-    # img_1 = cv2.imread(f"{IMGDIR}/panoramas/parrington/prtn00.jpg")
-    # img_2 = cv2.imread(f"{IMGDIR}/panoramas/parrington/prtn01.jpg")
-    # img_3 = cv2.imread(f"{IMGDIR}/panoramas/parrington/prtn02.jpg")
-    # img_4 = cv2.imread(f"{IMGDIR}/panoramas/parrington/prtn03.jpg")
-    # img_5 = cv2.imread(f"{IMGDIR}/panoramas/parrington/prtn04.jpg")
+    # filename = "Xue-Mountain-Entrance"
+    # partname1 = "DSC_0171"
+    # partname2 = "DSC_0172"
+    # partname3 = "DSC_0173"
+    # partname4 = "DSC_0174"
+    # partname5 = "DSC_0175"
+
+    # img_1 = cv2.imread(f"{IMGDIR}/panoramas/{filename}/{partname1}.jpg")
+    # img_2 = cv2.imread(f"{IMGDIR}/panoramas/{filename}/{partname2}.jpg")
+    # img_3 = cv2.imread(f"{IMGDIR}/panoramas/{filename}/{partname3}.jpg")
+    # img_4 = cv2.imread(f"{IMGDIR}/panoramas/{filename}/{partname4}.jpg")
+    # img_5 = cv2.imread(f"{IMGDIR}/panoramas/{filename}/{partname5}.jpg")
+
     # img_list = []
     # img_list.append(img_1)
     # img_list.append(img_2)
@@ -316,4 +538,4 @@ if __name__ == "__main__":
     # img_list.append(img_4)
     # img_list.append(img_5)
     # pano = generate_panorama(img_list)
-    # cv2.imwrite("outputs/panorama_3.jpg", pano)
+    # cv2.imwrite(f"outputs/panorama_{filename}_{partname1}_{partname5}.jpg", pano)
