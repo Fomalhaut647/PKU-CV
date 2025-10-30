@@ -6,7 +6,7 @@ import cv2
 from os import listdir
 import matplotlib.pyplot as plt
 
-
+EPS = 1e-5
 IMGDIR = "Problem2Images"
 
 
@@ -16,7 +16,7 @@ def gradient_x(img):
     # should we conduct some pre-processing to remove noise? which kernel should we apply?
     # which kernel should we choose to calculate gradient_x?
     # TODO
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2Gray)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     gaussian = cv2.GaussianBlur(gray, (3, 3), 0)
     grad_x = cv2.Sobel(gaussian, cv2.CV_32F, 1, 0, ksize=3)
     return grad_x
@@ -24,7 +24,7 @@ def gradient_x(img):
 
 def gradient_y(img):
     # TODO
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2Gray)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     gaussian = cv2.GaussianBlur(gray, (3, 3), 0)
     grad_y = cv2.Sobel(gaussian, cv2.CV_32F, 0, 1, ksize=3)
     return grad_y
@@ -81,11 +81,69 @@ def histogram_of_gradients(img, pix):
     #   1. grad_x & grad_y
     #   2. grad_dir by arctan function
     #   3. for each interest point, choose m*m blocks with each consists of m*m pixels
-    #   4. I divide the region into n directions (maybe 8).
+    #   4. divide the region into n directions (maybe 8).
     #   5. For each blocks, calculate the number of derivatives in those directions and normalize the Histogram.
     #   6. After that, select the prominent gradient and take it as principle orientation.
     #   7. Then rotate it’s neighbor to fit principle orientation and calculate the histogram again.
     # TODO
+    M_BLOCKS = 4
+    M_PIXELS = 4
+    N_BINS = 8
+
+    win_size = M_BLOCKS * M_PIXELS
+    half_win = win_size // 2
+    bin_width = 360 / N_BINS
+    height, width = img.shape[:2]
+
+    grad_x = gradient_x(img)
+    grad_y = gradient_y(img)
+    mag, ori = cv2.cartToPolar(grad_x, grad_y, angleInDegrees=True)
+
+    gaussian_kernel = cv2.getGaussianKernel(win_size, win_size / 2)
+    gaussian_window_2d = gaussian_kernel * gaussian_kernel.T
+
+    features_list = []
+
+    # 遍历每个传入的角点
+    for u, v in pix:  # u = row, v = col
+        descriptor_hist = np.zeros((M_BLOCKS, M_BLOCKS, N_BINS))
+
+        # 遍历角点周围的 16x16 窗口
+        for r_win in range(win_size):
+            for c_win in range(win_size):
+
+                # 映射到图像的绝对坐标
+                r_img = u - half_win + r_win
+                c_img = v - half_win + c_win
+
+                # 边界检查，如果像素点在图像外，跳过
+                if r_img < 0 or r_img >= height or c_img < 0 or c_img >= width:
+                    continue
+
+                # 乘以高斯权重
+                m = mag[r_img, c_img] * gaussian_window_2d[r_win, c_win]
+                o = ori[r_img, c_img]
+
+                block_r = r_win // M_PIXELS
+                block_c = c_win // M_PIXELS
+
+                bins = int(o // bin_width) % N_BINS
+                descriptor_hist[block_r, block_c, bins] += m
+
+        descriptor = descriptor_hist.flatten()
+
+        norm = np.linalg.norm(descriptor)
+        descriptor /= norm + EPS
+
+        descriptor = np.clip(descriptor, 0, 0.2)
+
+        norm = np.linalg.norm(descriptor)
+        descriptor /= norm + EPS
+
+        features_list.append(descriptor)
+
+    features = np.array(features_list)
+
     return features
 
 
@@ -149,7 +207,9 @@ def test_matching():
     for i in range(N):
         x1, y1 = pixels_1[i]
         x2, y2 = pixels_2[i]
-        plt.plot([x1, x2 + W_1], [y1, y2])
+
+        # cv2 和 plt 的长宽的定义是相反的
+        plt.plot([y1, y2 + W_1], [x1, x2])
 
     # plt.show()
     plt.savefig("test.jpg")
@@ -244,16 +304,16 @@ if __name__ == "__main__":
     test_matching()
 
     # an example
-    img_1 = cv2.imread(f"{IMGDIR}/panoramas/parrington/prtn00.jpg")
-    img_2 = cv2.imread(f"{IMGDIR}/panoramas/parrington/prtn01.jpg")
-    img_3 = cv2.imread(f"{IMGDIR}/panoramas/parrington/prtn02.jpg")
-    img_4 = cv2.imread(f"{IMGDIR}/panoramas/parrington/prtn03.jpg")
-    img_5 = cv2.imread(f"{IMGDIR}/panoramas/parrington/prtn04.jpg")
-    img_list = []
-    img_list.append(img_1)
-    img_list.append(img_2)
-    img_list.append(img_3)
-    img_list.append(img_4)
-    img_list.append(img_5)
-    pano = generate_panorama(img_list)
-    cv2.imwrite("outputs/panorama_3.jpg", pano)
+    # img_1 = cv2.imread(f"{IMGDIR}/panoramas/parrington/prtn00.jpg")
+    # img_2 = cv2.imread(f"{IMGDIR}/panoramas/parrington/prtn01.jpg")
+    # img_3 = cv2.imread(f"{IMGDIR}/panoramas/parrington/prtn02.jpg")
+    # img_4 = cv2.imread(f"{IMGDIR}/panoramas/parrington/prtn03.jpg")
+    # img_5 = cv2.imread(f"{IMGDIR}/panoramas/parrington/prtn04.jpg")
+    # img_list = []
+    # img_list.append(img_1)
+    # img_list.append(img_2)
+    # img_list.append(img_3)
+    # img_list.append(img_4)
+    # img_list.append(img_5)
+    # pano = generate_panorama(img_list)
+    # cv2.imwrite("outputs/panorama_3.jpg", pano)
