@@ -32,7 +32,7 @@ if not backend_set:
 import scipy
 
 # 用于生成唯一文件名的计数器
-_visualization_counter = {"matches": 0, "fundamental": 0}
+_visualization_counter = {"matches": 0, "normed": 0, "original": 0}
 
 
 def show_or_save(fig, filename=None, counter_key=None):
@@ -77,7 +77,7 @@ def visualize_matches(I1, I2, matches):
     ax.plot(
         [matches[:, 0], matches[:, 2] + I1.size[0]], [matches[:, 1], matches[:, 3]], "r"
     )
-    show_or_save(fig, "matches_visualization.png", counter_key="matches")
+    show_or_save(fig, "matches.png", counter_key="matches")
 
 
 def normalize_points(pts):
@@ -87,10 +87,24 @@ def normalize_points(pts):
     # :return normalized_pts: normalized points
     # :return T: transformation matrix from original to normalized points
 
+    mu = np.mean(pts, axis=0)
+    scale = 1 / np.sqrt(np.mean((pts - mu) ** 2))
+
+    T = np.array(
+        [
+            [scale, 0, -scale * mu[0]],
+            [0, scale, -scale * mu[1]],
+            [0, 0, 1],
+        ]
+    )
+
+    homo_pts = np.concatenate((pts, np.ones((pts.shape[0], 1))), axis=1)
+    normalized_pts = (T @ homo_pts.T).T[:, :2]
+
     return normalized_pts, T
 
 
-def fit_fundamental(matches):
+def fit_fundamental(matches, normed=True):
     # Calculate fundamental matrix from ground truth matches
     # 1. (normalize points if necessary)
     # 2. (x2, y2, 1) * F * (x1, y1, 1)^T = 0 -> AX = 0
@@ -101,10 +115,38 @@ def fit_fundamental(matches):
     # 5. use SVD to decomposite F, set the smallest eigenvalue as 0, and recalculate F
     # 6. Report your fundamental matrix results
 
+    p1, p2 = matches[:, :2], matches[:, 2:]
+
+    if normed:
+        normed_p1, T1 = normalize_points(p1)
+        normed_p2, T2 = normalize_points(p2)
+
+        x1, y1 = normed_p1[:, 0], normed_p1[:, 1]
+        x2, y2 = normed_p2[:, 0], normed_p2[:, 1]
+
+    else:
+        x1, y1 = p1[:, 0], p2[:, 1]
+        x2, y2 = p2[:, 0], p2[:, 1]
+        T1 = T2 = np.eye(3)
+
+    A = np.stack(
+        (x1 * x2, y1 * x2, x2, x1 * y2, y1 * y2, y2, x1, y1, np.ones_like(x1)),
+        axis=1,
+    )
+
+    U, S, Vh = np.linalg.svd(A)
+    f = Vh[-1]
+    F_prime = f.reshape(3, 3)
+
+    U_F, S_F, Vh_F = np.linalg.svd(F_prime)
+    S_F[2] = 0
+    F_rank2 = U_F @ np.diag(S_F) @ Vh_F
+    F = T2.T @ F_rank2 @ T1
+
     return F
 
 
-def visualize_fundamental(matches, F, I1, I2):
+def visualize_fundamental(matches, F, I1, I2, normed=True):
     # Visualize the fundamental matrix in image 2
     N = len(matches)
     M = np.c_[matches[:, 0:2], np.ones((N, 1))].transpose()
@@ -132,7 +174,10 @@ def visualize_fundamental(matches, F, I1, I2):
     ax.plot(matches[:, 2], matches[:, 3], "+r")
     ax.plot([matches[:, 2], closest_pt[:, 0]], [matches[:, 3], closest_pt[:, 1]], "r")
     ax.plot([pt1[:, 0], pt2[:, 0]], [pt1[:, 1], pt2[:, 1]], "g")
-    show_or_save(fig, "fundamental_visualization.png", counter_key="fundamental")
+    if normed:
+        show_or_save(fig, "fundamental_normed.png", counter_key="normed")
+    else:
+        show_or_save(fig, "fundamental_original.png", counter_key="original")
 
 
 def evaluate_fundamental(matches, F):
@@ -143,6 +188,7 @@ def evaluate_fundamental(matches, F):
     product = np.dot(np.dot(points2_homogeneous, F), points1_homogeneous.T)
     diag = np.diag(product)
     residual = np.mean(diag**2)
+    print(residual)
     return residual
 
 
@@ -163,18 +209,38 @@ lab_matches = np.loadtxt("data/lab_matches.txt")
 visualize_matches(library_image1, library_image2, library_matches)
 visualize_matches(lab_image1, lab_image2, lab_matches)
 
-# ## Task 1: Fundamental matrix
-# ## display second image with epipolar lines reprojected from the first image
+## Task 1: Fundamental matrix
+## display second image with epipolar lines reprojected from the first image
 
-# # first, fit fundamental matrix to the matches
-# # Report your fundamental matrices, visualization and evaluation results
-# library_F = fit_fundamental(library_matches)  # this is a function that you should write
-# visualize_fundamental(library_matches, library_F, library_image1, library_image2)
-# assert evaluate_fundamental(library_matches, library_F) < 0.5
+# first, fit fundamental matrix to the matches
+# Report your fundamental matrices, visualization and evaluation results
+library_F_normed = fit_fundamental(
+    library_matches, normed=True
+)  # this is a function that you should write
+visualize_fundamental(
+    library_matches, library_F_normed, library_image1, library_image2, normed=True
+)
+assert evaluate_fundamental(library_matches, library_F_normed) < 0.5
 
-# lab_F = fit_fundamental(lab_matches)  # this is a function that you should write
-# visualize_fundamental(lab_matches, lab_F, lab_image1, lab_image2)
-# assert evaluate_fundamental(lab_matches, lab_F) < 0.5
+lab_F_normed = fit_fundamental(
+    lab_matches, normed=True
+)  # this is a function that you should write
+visualize_fundamental(lab_matches, lab_F_normed, lab_image1, lab_image2, normed=True)
+assert evaluate_fundamental(lab_matches, lab_F_normed) < 0.5
+
+library_F = fit_fundamental(
+    library_matches, normed=False
+)  # this is a function that you should write
+visualize_fundamental(
+    library_matches, library_F, library_image1, library_image2, normed=False
+)
+evaluate_fundamental(library_matches, library_F)
+
+lab_F = fit_fundamental(
+    lab_matches, normed=False
+)  # this is a function that you should write
+visualize_fundamental(lab_matches, lab_F, lab_image1, lab_image2, normed=False)
+evaluate_fundamental(lab_matches, lab_F)
 
 # ## Task 2: Camera Calibration
 
