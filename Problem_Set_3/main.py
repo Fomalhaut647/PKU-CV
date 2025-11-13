@@ -1,5 +1,6 @@
 from PIL import Image
 import numpy as np
+import scipy
 import matplotlib
 import os
 
@@ -301,6 +302,16 @@ def rq_decomposition(P):
     # :param P: projection matrix
     # :return K, R, T: camera matrices
 
+    M = P[:, :-1]
+    K, R = scipy.linalg.rq(M)
+    T = np.linalg.inv(K) @ P[:, 3]
+    scale = K[2, 2]
+    K /= scale
+    S = np.diag([np.sqrt(scale), np.sqrt(scale), 1 / scale])
+    K = K @ S
+    R = np.linalg.inv(S) @ R
+    T = np.linalg.inv(S) @ T
+
     return K, R, T
 
 
@@ -349,16 +360,16 @@ for key, points_2d in zip(["lab_a", "lab_b"], [lab_matches[:, :2], lab_matches[:
     projection_matrix[key] = P
 print("Task 2 pass")
 
-# ## Task 3
-# ## Camera Centers
-# projection_library_a = np.loadtxt("data/library1_camera.txt")
-# projection_library_b = np.loadtxt("data/library2_camera.txt")
-# projection_matrix["library_a"] = projection_library_a
-# projection_matrix["library_b"] = projection_library_b
+## Task 3
+## Camera Centers
+projection_library_a = np.loadtxt("data/library1_camera.txt")
+projection_library_b = np.loadtxt("data/library2_camera.txt")
+projection_matrix["library_a"] = projection_library_a
+projection_matrix["library_b"] = projection_library_b
 
-# for P in projection_matrix.values():
-#     # Paste your K, R, T results in your report
-#     K, R, T = rq_decomposition(P)
+for P in projection_matrix.values():
+    # Paste your K, R, T results in your report
+    K, R, T = rq_decomposition(P)
 
 
 # ## Task 4: Triangulation
