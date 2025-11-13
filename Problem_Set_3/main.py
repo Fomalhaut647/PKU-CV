@@ -58,7 +58,7 @@ def show_or_save(fig, filename=None, counter_key=None):
             )
             filename = f"{name}_{_visualization_counter[counter_key]}.{ext}"
         fig.savefig(filename, dpi=150, bbox_inches="tight")
-        print(f"图像已保存到: {filename}")
+        print(f"The image has been saved to: {filename}")
         plt.close(fig)  # 关闭图形以释放内存
 
 
@@ -194,6 +194,7 @@ def evaluate_fundamental(matches, F):
 
 
 ## Task 0: Load data and visualize
+print("-" * 20, "Task 0 start", "-" * 20)
 ## load images and match files for the first example
 ## matches[:, :2] is a point in the first image
 ## matches[:, 2:] is a corresponding point in the second image
@@ -210,8 +211,11 @@ lab_matches = np.loadtxt("data/lab_matches.txt")
 visualize_matches(library_image1, library_image2, library_matches)
 visualize_matches(lab_image1, lab_image2, lab_matches)
 
+print("-" * 20, "Task 0 end", "-" * 20, end="\n\n")
+
 
 ## Task 1: Fundamental matrix
+print("-" * 20, "Task 1 start", "-" * 20)
 ## display second image with epipolar lines reprojected from the first image
 
 # first, fit fundamental matrix to the matches
@@ -244,8 +248,11 @@ lab_F = fit_fundamental(
 visualize_fundamental(lab_matches, lab_F, lab_image1, lab_image2, normed=False)
 evaluate_fundamental(lab_matches, lab_F)
 
+print("-" * 20, "Task 1 end", "-" * 20, end="\n\n")
+
 
 ## Task 2: Camera Calibration
+print("-" * 20, "Task 2 start", "-" * 20)
 
 
 def calc_projection(points_2d, points_3d):
@@ -305,12 +312,16 @@ def rq_decomposition(P):
     M = P[:, :-1]
     K, R = scipy.linalg.rq(M)
     T = np.linalg.inv(K) @ P[:, 3]
+
+    # 在 rq_decomposition() 函数中，归一化时，为了确保旋转矩阵 R 的行列式仍然是 1 且 K[R|T] = alpha * P 仍然成立，
+    # 先执行 K /= scale 完成归一化第一步
     scale = K[2, 2]
     K /= scale
-    S = np.diag([np.sqrt(scale), np.sqrt(scale), 1 / scale])
+    # 然后把 K 的前 2 个对角元调整为正数，因为这 2 个元素代表焦距，必须是正数
+    S = np.diag(np.sign(np.diag(K)))
     K = K @ S
-    R = np.linalg.inv(S) @ R
-    T = np.linalg.inv(S) @ T
+    R = R @ S
+    T = T @ S
 
     return K, R, T
 
@@ -376,23 +387,34 @@ for key, points_2d in zip(["lab_a", "lab_b"], [lab_matches[:, :2], lab_matches[:
     distance = np.mean(np.linalg.norm(points_2d - points_3d_proj))
     # Check: residual should be < 20 and distance should be < 4
     assert residual < 20.0 and distance < 4.0
+    print()
+    print(f"residual: {residual}")
+    print(f"distance: {distance}")
     projection_matrix[key] = P
 print("Task 2 pass")
 
+print("-" * 20, "Task 2 end", "-" * 20, end="\n\n")
+
 ## Task 3
+print("-" * 20, "Task 3 start", "-" * 20)
 ## Camera Centers
 projection_library_a = np.loadtxt("data/library1_camera.txt")
 projection_library_b = np.loadtxt("data/library2_camera.txt")
 projection_matrix["library_a"] = projection_library_a
 projection_matrix["library_b"] = projection_library_b
 
-for P in projection_matrix.values():
+for i, P in enumerate(projection_matrix.values()):
     # Paste your K, R, T results in your report
     K, R, T = rq_decomposition(P)
+    print(f"K{i+1}: {K}", f"R{i+1}: {R}", f"T{i+1}: {T}", sep="\n", end="\n\n")
+
+print("-" * 20, "Task 3 end", "-" * 20, end="\n\n")
 
 
 ## Task 4: Triangulation
+print("-" * 20, "Task 4 start", "-" * 20)
 lab_points_3d_estimated = []
+residual_3ds = []
 for point_2d_a, point_2d_b, point_3d_gt in zip(
     lab_matches[:, :2], lab_matches[:, 2:], lab_points_3d
 ):
@@ -403,7 +425,14 @@ for point_2d_a, point_2d_b, point_3d_gt in zip(
     # Residual between ground truth and estimated 3D points
     residual_3d = np.sum(np.linalg.norm(point_3d_gt - point_3d_estimated))
     assert residual_3d < 0.1
+    print(f"residual_3d: {residual_3d}")
+    residual_3ds.append(residual_3d)
     lab_points_3d_estimated.append(point_3d_estimated)
+residual_3ds = np.array(residual_3ds)
+mean_residual_3d = np.mean(residual_3ds)
+max_residual_3d = np.max(residual_3ds)
+print(f"mean of residual_3d: {mean_residual_3d}")
+print(f"max of residual_3d: {max_residual_3d}")
 
 # Residual between re-projected and observed 2D points
 lab_points_3d_estimated = np.stack(lab_points_3d_estimated)
@@ -414,6 +443,8 @@ _, residual_b = evaluate_points(
     projection_matrix["lab_b"], lab_matches[:, 2:], lab_points_3d_estimated
 )
 assert residual_a < 20 and residual_b < 20
+print(f"residual_a: {residual_a}")
+print(f"residual_b: {residual_b}")
 
 library_points_3d_estimated = []
 for point_2d_a, point_2d_b in zip(library_matches[:, :2], library_matches[:, 2:]):
@@ -434,31 +465,105 @@ _, residual_b = evaluate_points(
     projection_matrix["library_b"], library_matches[:, 2:], library_points_3d_estimated
 )
 assert residual_a < 30 and residual_b < 30
+print(f"residual_a: {residual_a}")
+print(f"residual_b: {residual_b}")
 print("Task 4 pass")
 
-# ## Task 5: Fundamental matrix estimation without ground-truth matches
-# import cv2
+print("-" * 20, "Task 4 end", "-" * 20, end="\n\n")
 
 
-# def fit_fundamental_without_gt(image1, image2):
-#     # Calculate fundamental matrix without groundtruth matches
-#     # 1. convert the images to gray
-#     # 2. compute SIFT keypoints and descriptors
-#     # 3. match descriptors with Brute Force Matcher
-#     # 4. select good matches
-#     # 5. extract matched keypoints
-#     # 6. compute fundamental matrix with RANSAC
-#     # :param image1, image2: two-view images
-#     # :return fundamental_matrix
-#     # :return matches: selected matched keypoints
-
-#     return fundamental_matrix, matches
+## Task 5: Fundamental matrix estimation without ground-truth matches
+print("-" * 20, "Task 5 start", "-" * 20)
+import cv2
 
 
-# house_image1 = Image.open("data/library1.jpg")
-# house_image2 = Image.open("data/library2.jpg")
+def fit_fundamental_without_gt(image1, image2):
+    # Calculate fundamental matrix without groundtruth matches
+    # 1. convert the images to gray
+    # 2. compute SIFT keypoints and descriptors
+    # 3. match descriptors with Brute Force Matcher
+    # 4. select good matches
+    # 5. extract matched keypoints
+    # 6. compute fundamental matrix with RANSAC
+    # :param image1, image2: two-view images
+    # :return fundamental_matrix
+    # :return matches: selected matched keypoints
 
-# house_F, house_matches = fit_fundamental_without_gt(
-#     np.array(house_image1), np.array(house_image2)
-# )
-# visualize_fundamental(house_matches, house_F, house_image1, house_image2)
+    # 1. convert the images to gray
+    gray1 = cv2.cvtColor(image1, cv2.COLOR_RGB2GRAY)
+    gray2 = cv2.cvtColor(image2, cv2.COLOR_RGB2GRAY)
+
+    # 2. compute SIFT keypoints and descriptors
+    sift = cv2.SIFT_create()
+    kp1, des1 = sift.detectAndCompute(gray1, None)
+    kp2, des2 = sift.detectAndCompute(gray2, None)
+
+    # 3. match descriptors with Brute Force Matcher
+    # k=2 表示为每个 des1 中的描述子找到两个最佳匹配
+    bf = cv2.BFMatcher()
+    matches_knn = bf.knnMatch(des1, des2, k=2)
+
+    # 4. select good matches
+    good_matches = []
+    for m, n in matches_knn:
+        if m.distance < 0.75 * n.distance:
+            good_matches.append(m)
+
+    # 5. extract matched keypoints
+    # 至少需要 8 个点才能计算基础矩阵
+    if len(good_matches) < 8:
+        print(f"Not enough good matches found - {len(good_matches)}/8")
+        return None, None
+
+    pts1 = np.float32([kp1[m.queryIdx].pt for m in good_matches]).reshape(-1, 2)
+    pts2 = np.float32([kp2[m.trainIdx].pt for m in good_matches]).reshape(-1, 2)
+
+    # 6. compute fundamental matrix with RANSAC
+    # cv2.FM_RANSAC 表示使用 RANSAC 算法
+    # 3.0 是 RANSAC 阈值 (in pixels)
+    # 0.99 是置信度
+    fundamental_matrix, mask = cv2.findFundamentalMat(
+        pts1, pts2, cv2.FM_RANSAC, 3.0, 0.99
+    )
+
+    if fundamental_matrix is None:
+        print("RANSAC failed to find fundamental matrix.")
+        return None, None
+
+    # 使用 mask 筛选出 RANSAC 认定的局内点 (inliers)
+    inlier_pts1 = pts1[mask.ravel() == 1]
+    inlier_pts2 = pts2[mask.ravel() == 1]
+
+    # 将局内点组合成 (N x 4) 的格式，以便 visualize_fundamental 函数使用
+    matches_inliers = np.hstack((inlier_pts1, inlier_pts2))
+
+    # 报告结果
+    print(f"\n--- RANSAC Results ---")
+    print(f"Total SIFT matches found: {len(good_matches)}")
+    print(f"Number of inliers: {len(matches_inliers)}")
+
+    # 计算局内点的平均残差 (使用 Task 1 中定义的函数)
+    avg_residual = evaluate_fundamental(matches_inliers, fundamental_matrix)
+    print(f"Average residual for inliers: {avg_residual}")
+    print(f"--- End RANSAC Results ---")
+
+    return fundamental_matrix, matches_inliers
+
+
+house_image1 = Image.open("data/house1.jpg")
+house_image2 = Image.open("data/house2.jpg")
+
+house_F, house_matches = fit_fundamental_without_gt(
+    np.array(house_image1), np.array(house_image2)
+)
+visualize_fundamental(house_matches, house_F, house_image1, house_image2)
+
+guadi_image1 = Image.open("data/gaudi1.jpg")
+guadi_image2 = Image.open("data/gaudi2.jpg")
+
+guadi_F, guadi_matches = fit_fundamental_without_gt(
+    np.array(guadi_image1), np.array(guadi_image2)
+)
+visualize_fundamental(guadi_matches, guadi_F, guadi_image1, guadi_image2)
+
+print("-" * 20, "Task 5 end", "-" * 20, end="\n\n")
