@@ -345,6 +345,25 @@ def triangulate_points(P1, P2, point1, point2):
     # :param point1, point2: points in two images
     # :return point_3d: 3D points calculated by triangulation
 
+    u1, v1 = point1[0], point1[1]
+    u2, v2 = point2[0], point2[1]
+
+    p11, p12, p13 = P1[0], P1[1], P1[2]
+    p21, p22, p23 = P2[0], P2[1], P2[2]
+
+    A = np.vstack(
+        [
+            u1 * p13 - p11,
+            v1 * p13 - p12,
+            u2 * p23 - p21,
+            v2 * p23 - p22,
+        ]
+    )
+
+    U, S, Vh = np.linalg.svd(A)
+    X_homo = Vh[-1]
+    point_3d = X_homo[:3] / X_homo[3]
+
     return point_3d
 
 
@@ -372,49 +391,50 @@ for P in projection_matrix.values():
     K, R, T = rq_decomposition(P)
 
 
-# ## Task 4: Triangulation
-# lab_points_3d_estimated = []
-# for point_2d_a, point_2d_b, point_3d_gt in zip(
-#     lab_matches[:, :2], lab_matches[:, 2:], lab_points_3d
-# ):
-#     point_3d_estimated = triangulate_points(
-#         projection_matrix["lab_a"], projection_matrix["lab_b"], point_2d_a, point_2d_b
-#     )
+## Task 4: Triangulation
+lab_points_3d_estimated = []
+for point_2d_a, point_2d_b, point_3d_gt in zip(
+    lab_matches[:, :2], lab_matches[:, 2:], lab_points_3d
+):
+    point_3d_estimated = triangulate_points(
+        projection_matrix["lab_a"], projection_matrix["lab_b"], point_2d_a, point_2d_b
+    )
 
-#     # Residual between ground truth and estimated 3D points
-#     residual_3d = np.sum(np.linalg.norm(point_3d_gt - point_3d_estimated))
-#     assert residual_3d < 0.1
-#     lab_points_3d_estimated.append(point_3d_estimated)
+    # Residual between ground truth and estimated 3D points
+    residual_3d = np.sum(np.linalg.norm(point_3d_gt - point_3d_estimated))
+    assert residual_3d < 0.1
+    lab_points_3d_estimated.append(point_3d_estimated)
 
-# # Residual between re-projected and observed 2D points
-# lab_points_3d_estimated = np.stack(lab_points_3d_estimated)
-# _, residual_a = evaluate_points(
-#     projection_matrix["lab_a"], lab_matches[:, :2], lab_points_3d_estimated
-# )
-# _, residual_b = evaluate_points(
-#     projection_matrix["lab_b"], lab_matches[:, 2:], lab_points_3d_estimated
-# )
-# assert residual_a < 20 and residual_b < 20
+# Residual between re-projected and observed 2D points
+lab_points_3d_estimated = np.stack(lab_points_3d_estimated)
+_, residual_a = evaluate_points(
+    projection_matrix["lab_a"], lab_matches[:, :2], lab_points_3d_estimated
+)
+_, residual_b = evaluate_points(
+    projection_matrix["lab_b"], lab_matches[:, 2:], lab_points_3d_estimated
+)
+assert residual_a < 20 and residual_b < 20
 
-# library_points_3d_estimated = []
-# for point_2d_a, point_2d_b in zip(library_matches[:, :2], library_matches[:, 2:]):
-#     point_3d_estimated = triangulate_points(
-#         projection_matrix["library_a"],
-#         projection_matrix["library_b"],
-#         point_2d_a,
-#         point_2d_b,
-#     )
-#     library_points_3d_estimated.append(point_3d_estimated)
+library_points_3d_estimated = []
+for point_2d_a, point_2d_b in zip(library_matches[:, :2], library_matches[:, 2:]):
+    point_3d_estimated = triangulate_points(
+        projection_matrix["library_a"],
+        projection_matrix["library_b"],
+        point_2d_a,
+        point_2d_b,
+    )
+    library_points_3d_estimated.append(point_3d_estimated)
 
-# # Residual between re-projected and observed 2D points
-# library_points_3d_estimated = np.stack(library_points_3d_estimated)
-# _, residual_a = evaluate_points(
-#     projection_matrix["library_a"], library_matches[:, :2], library_points_3d_estimated
-# )
-# _, residual_b = evaluate_points(
-#     projection_matrix["library_b"], library_matches[:, 2:], library_points_3d_estimated
-# )
-# assert residual_a < 30 and residual_b < 30
+# Residual between re-projected and observed 2D points
+library_points_3d_estimated = np.stack(library_points_3d_estimated)
+_, residual_a = evaluate_points(
+    projection_matrix["library_a"], library_matches[:, :2], library_points_3d_estimated
+)
+_, residual_b = evaluate_points(
+    projection_matrix["library_b"], library_matches[:, 2:], library_points_3d_estimated
+)
+assert residual_a < 30 and residual_b < 30
+print("Task 4 pass")
 
 # ## Task 5: Fundamental matrix estimation without ground-truth matches
 # import cv2
