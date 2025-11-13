@@ -209,6 +209,7 @@ lab_matches = np.loadtxt("data/lab_matches.txt")
 visualize_matches(library_image1, library_image2, library_matches)
 visualize_matches(lab_image1, lab_image2, lab_matches)
 
+
 ## Task 1: Fundamental matrix
 ## display second image with epipolar lines reprojected from the first image
 
@@ -242,78 +243,111 @@ lab_F = fit_fundamental(
 visualize_fundamental(lab_matches, lab_F, lab_image1, lab_image2, normed=False)
 evaluate_fundamental(lab_matches, lab_F)
 
-# ## Task 2: Camera Calibration
+
+## Task 2: Camera Calibration
 
 
-# def calc_projection(points_2d, points_3d):
-#     # Calculate camera projection matrices
-#     # 1. Points_2d = P * Points_3d -> AX = 0
-#     # X = (p_11, p_12, ..., p_34) is flatten of P
-#     # build matrix A(2*N, 12) from points_2d
-#     # 2. SVD decomposite A
-#     # 3. take the eigen vector(12, ) of smallest eigen value
-#     # 4. return projection matrix(3, 4)
-#     # :param points_2d: 2D points N x 2
-#     # :param points_3d: 3D points N x 3
-#     # :return P: projection matrix
+def calc_projection(points_2d, points_3d):
+    # Calculate camera projection matrices
+    # 1. Points_2d = P * Points_3d -> AX = 0
+    # X = (p_11, p_12, ..., p_34) is flatten of P
+    # build matrix A(2*N, 12) from points_2d
+    # 2. SVD decomposite A
+    # 3. take the eigen vector(12, ) of smallest eigen value
+    # 4. return projection matrix(3, 4)
+    # :param points_2d: 2D points N x 2
+    # :param points_3d: 3D points N x 3
+    # :return P: projection matrix
 
-#     return P
+    N = points_2d.shape[0]
+    A = np.zeros((2 * N, 12))
 
+    x = points_2d[:, 0]
+    y = points_2d[:, 1]
+    X = points_3d[:, 0]
+    Y = points_3d[:, 1]
+    Z = points_3d[:, 2]
 
-# def rq_decomposition(P):
-#     # Use RQ decomposition to calculte K, R, T
-#     # 1. perform RQ decomposition on left-most 3x3 matrix of P(3 x 4) to get K, R
-#     # 2. calculate T by P = K[R|T]
-#     # 3. normalize to set K[2, 2] = 1
-#     # :param P: projection matrix
-#     # :return K, R, T: camera matrices
+    A[::2, 0] = X
+    A[::2, 1] = Y
+    A[::2, 2] = Z
+    A[::2, 3] = 1
+    A[::2, 8] = -x * X
+    A[::2, 9] = -x * Y
+    A[::2, 10] = -x * Z
+    A[::2, 11] = -x
 
-#     return K, R, T
+    A[1::2, 4] = X
+    A[1::2, 5] = Y
+    A[1::2, 6] = Z
+    A[1::2, 7] = 1
+    A[1::2, 8] = -y * X
+    A[1::2, 9] = -y * Y
+    A[1::2, 10] = -y * Z
+    A[1::2, 11] = -y
 
+    U, S, Vh = np.linalg.svd(A)
+    p = Vh[-1]
+    P = p.reshape(3, 4)
 
-# def evaluate_points(P, points_2d, points_3d):
-#     # Visualize the actual 2D points and the projected 2D points calculated from
-#     # the projection matrix
-#     # You do not need to modify anything in this function, although you can if you
-#     # want to
-#     # :param P: projection matrix 3 x 4
-#     # :param points_2d: 2D points N x 2
-#     # :param points_3d: 3D points N x 3
-#     # :return points_3d_proj: project 3D points to 2D by P
-#     # :return residual: residual of points_3d_proj and points_2d
-
-#     N = len(points_3d)
-#     points_3d = np.hstack((points_3d, np.ones((N, 1))))
-#     points_3d_proj = np.dot(P, points_3d.T).T
-#     u = points_3d_proj[:, 0] / points_3d_proj[:, 2]
-#     v = points_3d_proj[:, 1] / points_3d_proj[:, 2]
-#     residual = np.sum(np.hypot(u - points_2d[:, 0], v - points_2d[:, 1]))
-#     points_3d_proj = np.hstack((u[:, np.newaxis], v[:, np.newaxis]))
-#     return points_3d_proj, residual
-
-
-# def triangulate_points(P1, P2, point1, point2):
-#     # Use linear least squares to triangulation 3d points
-#     # 1. Solve: point1 = P1 * point_3d
-#     #           point2 = P2 * point_3d
-#     # 2. use SVD decomposition to solve linear equations
-#     # :param P1, P2 (3 x 4): projection matrix of two cameras
-#     # :param point1, point2: points in two images
-#     # :return point_3d: 3D points calculated by triangulation
-
-#     return point_3d
+    return P
 
 
-# lab_points_3d = np.loadtxt("data/lab_3d.txt")
+def rq_decomposition(P):
+    # Use RQ decomposition to calculte K, R, T
+    # 1. perform RQ decomposition on left-most 3x3 matrix of P(3 x 4) to get K, R
+    # 2. calculate T by P = K[R|T]
+    # 3. normalize to set K[2, 2] = 1
+    # :param P: projection matrix
+    # :return K, R, T: camera matrices
 
-# projection_matrix = dict()
-# for key, points_2d in zip(["lab_a", "lab_b"], [lab_matches[:, :2], lab_matches[:, 2:]]):
-#     P = calc_projection(points_2d, lab_points_3d)
-#     points_3d_proj, residual = evaluate_points(P, points_2d, lab_points_3d)
-#     distance = np.mean(np.linalg.norm(points_2d - points_3d_proj))
-#     # Check: residual should be < 20 and distance should be < 4
-#     assert residual < 20.0 and distance < 4.0
-#     projection_matrix[key] = P
+    return K, R, T
+
+
+def evaluate_points(P, points_2d, points_3d):
+    # Visualize the actual 2D points and the projected 2D points calculated from
+    # the projection matrix
+    # You do not need to modify anything in this function, although you can if you
+    # want to
+    # :param P: projection matrix 3 x 4
+    # :param points_2d: 2D points N x 2
+    # :param points_3d: 3D points N x 3
+    # :return points_3d_proj: project 3D points to 2D by P
+    # :return residual: residual of points_3d_proj and points_2d
+
+    N = len(points_3d)
+    points_3d = np.hstack((points_3d, np.ones((N, 1))))
+    points_3d_proj = np.dot(P, points_3d.T).T
+    u = points_3d_proj[:, 0] / points_3d_proj[:, 2]
+    v = points_3d_proj[:, 1] / points_3d_proj[:, 2]
+    residual = np.sum(np.hypot(u - points_2d[:, 0], v - points_2d[:, 1]))
+    points_3d_proj = np.hstack((u[:, np.newaxis], v[:, np.newaxis]))
+    return points_3d_proj, residual
+
+
+def triangulate_points(P1, P2, point1, point2):
+    # Use linear least squares to triangulation 3d points
+    # 1. Solve: point1 = P1 * point_3d
+    #           point2 = P2 * point_3d
+    # 2. use SVD decomposition to solve linear equations
+    # :param P1, P2 (3 x 4): projection matrix of two cameras
+    # :param point1, point2: points in two images
+    # :return point_3d: 3D points calculated by triangulation
+
+    return point_3d
+
+
+lab_points_3d = np.loadtxt("data/lab_3d.txt")
+
+projection_matrix = dict()
+for key, points_2d in zip(["lab_a", "lab_b"], [lab_matches[:, :2], lab_matches[:, 2:]]):
+    P = calc_projection(points_2d, lab_points_3d)
+    points_3d_proj, residual = evaluate_points(P, points_2d, lab_points_3d)
+    distance = np.mean(np.linalg.norm(points_2d - points_3d_proj))
+    # Check: residual should be < 20 and distance should be < 4
+    assert residual < 20.0 and distance < 4.0
+    projection_matrix[key] = P
+print("Task 2 pass")
 
 # ## Task 3
 # ## Camera Centers
