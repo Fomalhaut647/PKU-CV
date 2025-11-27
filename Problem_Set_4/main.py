@@ -7,6 +7,7 @@ import trimesh
 import multiprocessing as mp
 from tqdm import tqdm
 from typing import Tuple
+import time
 
 
 def normalize_disparity_map(disparity_map):
@@ -47,15 +48,122 @@ def task1_compute_disparity_map_simple(
     4. Select the best disparity that minimize window difference between ref_img[row, col] and sec_img[row, col - d]
     """
 
-    disparity_map = ...
+    h, w = ref_img.shape
+    min_disp, max_disp = disparity_range
+
+    # Initialize disparity map and best cost map
+    # For SSD/SAD, we want to minimize cost (init with infinity)
+    # For NCC, we want to maximize correlation (init with -1)
+    disparity_map = np.zeros((h, w), dtype=np.float32)
+
+    if matching_function in ["SSD", "SAD"]:
+        best_cost = np.full((h, w), np.inf, dtype=np.float32)
+    elif matching_function == "normalized_correlation":
+        best_cost = np.full((h, w), -1.0, dtype=np.float32)
+    else:
+        raise ValueError(f"Unknown matching function: {matching_function}")
+
+    # Kernel for summing up costs within the window
+    kernel = np.ones((window_size, window_size), np.float32)
+
+    # Pre-computation for Normalized Correlation to speed up
+    if matching_function == "normalized_correlation":
+        # Compute local sum of squares for ref_img once
+        ref_sq = ref_img.astype(np.float32) ** 2
+        ref_sq_sum = cv2.filter2D(ref_sq, -1, kernel, borderType=cv2.BORDER_CONSTANT)
+        # Fix: Clamp negative values due to floating point precision errors
+        ref_sq_sum = np.maximum(ref_sq_sum, 0)
+        ref_sq_sum = np.sqrt(ref_sq_sum)  # Standard deviation part 1
+
+    print(f"Computing disparity ({matching_function})...")
+
+    # Iterate over the disparity range
+    for d in tqdm(range(min_disp, max_disp)):
+        # Create a shifted version of the secondary image
+        # Pixels that shift out of bounds need handling.
+        # We simulate ref_img(x, y) matching with sec_img(x - d, y)
+
+        # Translation matrix for shifting: x -> x + d (since sec_img is naturally to the right, we shift it right to align)
+        # Wait, standard stereo: x_left = x, x_right = x - d.
+        # So we want to compare Ref(x) with Sec(x-d).
+        # To align Sec(x-d) to Ref(x), we need to shift Sec image to the *right* by d pixels.
+        M = np.float32([[1, 0, d], [0, 1, 0]])
+        sec_shifted = cv2.warpAffine(
+            sec_img, M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0
+        )
+
+        # Mask to ignore boundary effects where shifted image has no data
+        valid_mask = np.ones((h, w), dtype=np.float32)
+        valid_mask = cv2.warpAffine(
+            valid_mask, M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0
+        )
+
+        ref_f = ref_img.astype(np.float32)
+        sec_f = sec_shifted.astype(np.float32)
+
+        if matching_function == "SSD":
+            # Cost = Sum((I1 - I2)^2)
+            diff = ref_f - sec_f
+            sq_diff = diff**2
+            # Sum over window using box filter
+            current_cost = cv2.filter2D(
+                sq_diff, -1, kernel, borderType=cv2.BORDER_CONSTANT
+            )
+
+            # Update best disparity
+            # We only update where valid_mask is true to avoid boundary artifacts
+            mask = (current_cost < best_cost) & (valid_mask > 0)
+            best_cost[mask] = current_cost[mask]
+            disparity_map[mask] = d
+
+        elif matching_function == "SAD":
+            # Cost = Sum(|I1 - I2|)
+            abs_diff = np.abs(ref_f - sec_f)
+            current_cost = cv2.filter2D(
+                abs_diff, -1, kernel, borderType=cv2.BORDER_CONSTANT
+            )
+
+            mask = (current_cost < best_cost) & (valid_mask > 0)
+            best_cost[mask] = current_cost[mask]
+            disparity_map[mask] = d
+
+        elif matching_function == "normalized_correlation":
+            # NCC = Sum(I1 * I2) / sqrt(Sum(I1^2) * Sum(I2^2))
+            # Note: This is a simplified local NCC. Zero-mean NCC (ZNCC) subtracts mean first.
+            # The prompt asks for "normalized_correlation", usually implying standard NCC.
+
+            numerator = cv2.filter2D(
+                ref_f * sec_f, -1, kernel, borderType=cv2.BORDER_CONSTANT
+            )
+
+            # Denominator
+            sec_sq = sec_f**2
+            sec_sq_sum = cv2.filter2D(
+                sec_sq, -1, kernel, borderType=cv2.BORDER_CONSTANT
+            )
+            # Fix: Clamp negative values due to floating point precision errors
+            sec_sq_sum = np.maximum(sec_sq_sum, 0)
+            sec_sq_sum = np.sqrt(sec_sq_sum)
+
+            denominator = ref_sq_sum * sec_sq_sum
+
+            # Avoid division by zero
+            denominator[denominator < 1e-5] = 1e-5
+
+            current_score = numerator / denominator
+
+            # Maximize correlation
+            mask = (current_score > best_cost) & (valid_mask > 0)
+            best_cost[mask] = current_score[mask]
+            disparity_map[mask] = d
 
     return disparity_map
 
 
 def task1_simple_disparity(ref_img, sec_img, gt_map, img_name="tsukuba"):
     """Compute disparity maps for different settings"""
-    window_sizes = [...]  # Try different window sizes
-    disparity_range = (..., ...)  # Determine appropriate disparity range
+    window_sizes = [3, 9, 15]  # Try different window sizes
+    disparity_range = (0, 16)  # Determine appropriate disparity range
     matching_functions = [
         "SSD",
         "SAD",
@@ -70,9 +178,15 @@ def task1_simple_disparity(ref_img, sec_img, gt_map, img_name="tsukuba"):
             print(
                 f"Computing disparity map for window_size={window_size}, disparity_range={disparity_range}, matching_function={matching_function}"
             )
+
+            start_time = time.time()
             disparity_map = task1_compute_disparity_map_simple(
                 ref_img, sec_img, window_size, disparity_range, matching_function
             )
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            print(f"Time taken: {elapsed_time:.4f} seconds")
+
             disparity_maps.append(
                 (disparity_map, window_size, matching_function, disparity_range)
             )
@@ -80,7 +194,7 @@ def task1_simple_disparity(ref_img, sec_img, gt_map, img_name="tsukuba"):
             visualize_disparity_map(
                 disparity_map,
                 gt_map,
-                save_path=f"output/task1_{img_name}_{window_size}_{dmin}_{dmax}_{matching_function}.png",
+                save_path=f"output/task1_{img_name}_w{window_size}_d{dmin}-{dmax}_{matching_function}.png",
             )
     return disparity_maps
 
