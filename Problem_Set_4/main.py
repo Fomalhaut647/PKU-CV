@@ -150,9 +150,13 @@ def main(tasks):
         # Compute disparity maps using cv2
         stereo = cv2.StereoBM.create(numDisparities=64, blockSize=15)
         moebius_disparity_cv2 = stereo.compute(moebius_img1_gray, moebius_img2_gray)
-        visualize_disparity_map(moebius_disparity_cv2, moebius_gt)
+        visualize_disparity_map(
+            moebius_disparity_cv2, moebius_gt, save_path="output/task0_1.png"
+        )
         tsukuba_disparity_cv2 = stereo.compute(tsukuba_img1_gray, tsukuba_img2_gray)
-        visualize_disparity_map(tsukuba_disparity_cv2, tsukuba_gt)
+        visualize_disparity_map(
+            tsukuba_disparity_cv2, tsukuba_gt, save_path="output/task0_2.png"
+        )
 
         if "2" in tasks:
             print("Running task2 with cv2 results ...")
