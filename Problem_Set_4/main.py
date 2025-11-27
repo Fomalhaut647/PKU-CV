@@ -281,7 +281,107 @@ def task2_visualize_pointcloud(
 def task3_compute_disparity_map_dp(ref_img, sec_img):
     """Conduct stereo matching with dynamic programming"""
 
-    disparity_map_dp = ...
+    # Parameters
+    # Occlusion cost acts as the smoothness penalty lambda.
+    # Higher value = smoother map, harder to change disparity.
+    # Lower value = noisier map, follows data more closely.
+    occlusion_cost = 10.0
+    max_disp = 16  # Consistent with Task 1 settings
+
+    h, w = ref_img.shape
+    disparity_map_dp = np.zeros((h, w), dtype=np.float32)
+
+    # Convert to float for accurate cost calculation
+    ref = ref_img.astype(np.float32)
+    sec = sec_img.astype(np.float32)
+
+    print(
+        f"Computing disparity map using Dynamic Programming (occ_cost={occlusion_cost})..."
+    )
+    start_time = time.time()
+
+    # Process each scanline (row) independently
+    for y in tqdm(range(h), desc="Processing Scanlines"):
+        # Cost Matrix C[x, d]:
+        # Min cost to reach pixel x with disparity d
+        C = np.full((w, max_disp), np.inf, dtype=np.float32)
+
+        # Path Matrix M[x, d]:
+        # Stores the best disparity 'k' at x-1 that leads to 'd' at x
+        M = np.zeros((w, max_disp), dtype=np.int32)
+
+        # --- 1. Initialization (First Pixel) ---
+        # For the first pixel x=0, calculate raw matching cost
+        for d in range(max_disp):
+            # If x - d < 0, it's an invalid match (out of image bounds)
+            if 0 - d >= 0:
+                C[0, d] = abs(ref[y, 0] - sec[y, 0 - d])
+            else:
+                # Assign a large cost for invalid boundary matches
+                C[0, d] = 1e5
+
+        # --- 2. Forward Pass (Fill DP Table) ---
+        for x in range(1, w):
+            # Calculate Data Term (Matching Cost) for all d at current x
+            # We want cost = |Ref[x] - Sec[x-d]|
+
+            # Vectorized calculation of data costs for this pixel
+            # Create indices for sec image: [x-0, x-1, ..., x-15]
+            sec_indices = x - np.arange(max_disp)
+
+            # Mask for valid indices (must be >= 0)
+            valid_mask = sec_indices >= 0
+
+            # Default high cost for invalid matches
+            data_costs = np.full(max_disp, 1e5, dtype=np.float32)
+
+            # Fill valid data costs (using SAD - Sum of Absolute Differences for single pixel)
+            if np.any(valid_mask):
+                valid_indices = sec_indices[valid_mask]
+                data_costs[valid_mask] = np.abs(ref[y, x] - sec[y, valid_indices])
+
+            # Calculate Smoothness/Transition Cost
+            # We need: min_k ( C[x-1, k] + penalty(|d - k|) )
+            # This step finds the best predecessor 'k' for each current disparity 'd'
+
+            prev_costs = C[x - 1, :]  # Shape (max_disp,)
+
+            # To vectorize: Create a grid of costs
+            # rows (axis 0) = current disparity 'd'
+            # cols (axis 1) = previous disparity 'k'
+            d_grid, k_grid = np.meshgrid(
+                np.arange(max_disp), np.arange(max_disp), indexing="ij"
+            )
+
+            # Smoothness penalty: linear model |d - k| * lambda
+            smoothness_costs = np.abs(d_grid - k_grid) * occlusion_cost
+
+            # Total transition cost = Previous Accum Cost + Smoothness Cost
+            # Broadcasting prev_costs (1, 16) across rows
+            total_trans_costs = prev_costs + smoothness_costs
+
+            # Find minimum cost and best 'k' for each 'd'
+            min_trans_costs = np.min(total_trans_costs, axis=1)  # Shape (max_disp,)
+            best_prev_ks = np.argmin(total_trans_costs, axis=1)  # Shape (max_disp,)
+
+            # Update Accum Cost and Store Path
+            C[x, :] = data_costs + min_trans_costs
+            M[x, :] = best_prev_ks
+
+        # --- 3. Backward Pass (Backtracking) ---
+        # Find the disparity with the minimum cost at the last pixel
+        best_end_d = np.argmin(C[w - 1, :])
+        disparity_map_dp[y, w - 1] = best_end_d
+
+        # Backtrack to x=0
+        curr_d = best_end_d
+        for x in range(w - 2, -1, -1):
+            curr_d = M[x + 1, curr_d]
+            disparity_map_dp[y, x] = curr_d
+
+    end_time = time.time()
+    elapsed = end_time - start_time
+    print(f"Task 3 DP Implementation finished in {elapsed:.4f} seconds.")
 
     return disparity_map_dp
 
