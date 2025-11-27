@@ -203,7 +203,17 @@ def task2_compute_depth_map(disparity_map, baseline, focal_length):
     """Compute depth map by z = fB / (x - x')
     Note that a disparity less or equal to zero should be ignored (set to zero)
     """
-    depth_map = ...
+    # Initialize depth map with zeros
+    depth_map = np.zeros_like(disparity_map, dtype=np.float32)
+
+    # Create a mask for valid disparities (disparity > 0)
+    # Adding a small epsilon or strictly > 0 to avoid division by zero
+    valid_mask = disparity_map > 0
+
+    # Compute depth only for valid pixels
+    # depth = (focal_length * baseline) / disparity
+    depth_map[valid_mask] = (focal_length * baseline) / disparity_map[valid_mask]
+
     return depth_map
 
 
@@ -221,19 +231,51 @@ def task2_visualize_pointcloud(
     6. You may need to cut some outliers for better performance
     """
     baseline = 10
-    focal_length = 10
+    focal_length = 30
     depth_map = task2_compute_depth_map(disparity_map, baseline, focal_length)
 
-    # Points
-    points = ...
+    h, w = disparity_map.shape
 
-    # Colors
-    colors = ...
+    # 1. Create Grid for X, Y coordinates
+    # x is horizontal (columns), y is vertical (rows)
+    x_grid, y_grid = np.meshgrid(np.arange(w), np.arange(h))
+
+    # 2. Filter valid points
+    # We filter out points with disparity <= 0 (already 0 in depth_map)
+    # You can also add depth thresholding here to remove outliers (e.g., depth < max_depth)
+    mask = disparity_map > 0
+
+    # Optional: Outlier removal (e.g., remove very far points)
+    # mask = mask & (depth_map < 500)
+
+    # 3. Extract coordinates
+    z_points = depth_map[mask]
+    x_points = x_grid[mask]
+    y_points = y_grid[mask]
+
+    # Stack to create (N, 3) points array
+    points = np.stack([x_points, y_points, z_points], axis=1)
+
+    # 4. Extract Colors
+    # ref_img is typically BGR if read by cv2, but PLY/Trimesh usually expects RGB.
+    if len(ref_img.shape) == 3:
+        valid_colors = ref_img[mask]
+        # Convert BGR to RGB
+        colors = cv2.cvtColor(
+            valid_colors.reshape(1, -1, 3), cv2.COLOR_BGR2RGB
+        ).reshape(-1, 3)
+    else:
+        # Grayscale handling
+        gray_vals = ref_img[mask]
+        colors = np.stack([gray_vals, gray_vals, gray_vals], axis=1)
+
+    print(f"Generating point cloud with {points.shape[0]} points...")
 
     # Save pointcloud to ply file
     pointcloud = trimesh.PointCloud(points, colors)
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     pointcloud.export(save_path, file_type="ply")
+    print(f"Point cloud saved to {save_path}")
 
 
 def task3_compute_disparity_map_dp(ref_img, sec_img):
@@ -310,7 +352,7 @@ def main(tasks):
                 task2_visualize_pointcloud(
                     tsukuba_img1,
                     disparity_map,
-                    save_path=f"output/task2_tsukuba_{window_size}_{dmin}_{dmax}_{matching_function}.ply",
+                    save_path=f"output/task2_tsukuba_w{window_size}_d{dmin}-{dmax}_{matching_function}.ply",
                 )
 
     # Task 3: Non-local constraints
