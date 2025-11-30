@@ -1,8 +1,9 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 from torch.utils.tensorboard import SummaryWriter
 import argparse
@@ -30,9 +31,14 @@ class FCNN(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(c_in, c_hidden),
             nn.ReLU(),
+            nn.Dropout(0.2),
             nn.Linear(c_hidden, c_hidden // 2),
             nn.ReLU(),
-            nn.Linear(c_hidden // 2, c_out),
+            nn.Dropout(0.2),
+            nn.Linear(c_hidden // 2, c_hidden // 4),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(c_hidden // 4, c_out),
         )
 
     def forward(self, x):
@@ -60,6 +66,13 @@ class CNN(nn.Module):
         self.layer3 = nn.Sequential(
             nn.Conv2d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+        )
+
+        self.layer4 = nn.Sequential(
+            nn.Conv2d(128, 256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
             nn.ReLU(),
             nn.MaxPool2d(2),
         )
@@ -232,8 +245,10 @@ if __name__ == "__main__":
     out_channels = 10
     batch_size = 128
 
-    random.seed(42)
-    torch.manual_seed(42)
+    seed = 42
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
     # argparse
     parser = argparse.ArgumentParser()
@@ -246,8 +261,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "-s", "--scheduler", type=str, default="cos", choices=["step", "cos", "cosine"]
     )
-    parser.add_argument("-e", "--epochs", type=int, default=10)
-    parser.add_argument("-lr", "--lr", type=float, default=1e-4)
+    parser.add_argument("-e", "--epochs", type=int, default=100)
+    parser.add_argument("-lr", "--lr", type=float, default=1e-3)
     parser.add_argument("--train", action="store_true")
     parser.add_argument("--test", action="store_true")
     args = parser.parse_args()
@@ -260,12 +275,30 @@ if __name__ == "__main__":
         device = torch.device("cpu")
 
     # data
-    transform = transforms.Compose(
-        [
-            transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-        ]
-    )
+    transform = {
+        "train": transforms.Compose(
+            [
+                transforms.RandomCrop((32, 32), padding=1),
+                transforms.RandomHorizontalFlip(),
+                # transforms.RandomRotation(15),
+                # transforms.ColorJitter(
+                #     brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1
+                # ),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
+                ),
+            ]
+        ),
+        "test": transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
+                ),
+            ]
+        ),
+    }
 
     # model
     if args.model == "linear":
@@ -281,12 +314,23 @@ if __name__ == "__main__":
 
     # train
     if args.train:
-        full_dataset = datasets.CIFAR10(
-            root="./data", download=True, train=True, transform=transform
+        train_dataset_full = datasets.CIFAR10(
+            root="./data", download=True, train=True, transform=transform["train"]
         )
-        train_size = int(0.9 * len(full_dataset))
-        val_size = len(full_dataset) - train_size
-        train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
+        val_dataset_full = datasets.CIFAR10(
+            root="./data", download=True, train=True, transform=transform["test"]
+        )
+
+        full_size = len(train_dataset_full)
+        train_size = int(0.9 * full_size)
+        indices = list(range(full_size))
+        np.random.shuffle(indices)
+        train_idx = indices[:train_size]
+        val_idx = indices[train_size:]
+
+        train_dataset = Subset(train_dataset_full, train_idx)
+        val_dataset = Subset(val_dataset_full, val_idx)
+
         train_loader = DataLoader(
             train_dataset, batch_size=batch_size, shuffle=True, num_workers=4
         )
@@ -299,7 +343,7 @@ if __name__ == "__main__":
     # test
     if args.test:
         test_dataset = datasets.CIFAR10(
-            root="./data", download=True, train=False, transform=transform
+            root="./data", download=True, train=False, transform=transform["test"]
         )
         test_loader = DataLoader(
             test_dataset, batch_size=batch_size, shuffle=False, num_workers=4
