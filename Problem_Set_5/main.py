@@ -11,6 +11,113 @@ import os
 import random
 
 
+# seed
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+
+
+# device
+def set_device():
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+# argparse
+def get_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-m", "--model", type=str, default="fcnn", choices=["linear", "fcnn", "cnn"]
+    )
+    parser.add_argument(
+        "-o", "--optimizer", type=str, default="adamw", choices=["sgd", "adamw"]
+    )
+    parser.add_argument(
+        "-s", "--scheduler", type=str, default="cos", choices=["step", "cos", "cosine"]
+    )
+    parser.add_argument("-e", "--epochs", type=int, default=100)
+    parser.add_argument("-lr", "--lr", type=float, default=1e-3)
+    parser.add_argument("-bs", "--batch_size", type=int, default=128)
+    parser.add_argument("--train", action="store_true")
+    parser.add_argument("--test", action="store_true")
+    return parser.parse_args()
+
+
+# data
+def data_process(batch_size, train=False, test=False):
+    transform = {
+        "train": transforms.Compose(
+            [
+                transforms.RandomCrop(size=(32, 32), padding=1),
+                # transforms.RandomResizedCrop(
+                #     size=(32, 32), scale=(0.8, 1.0), ratio=(0.5, 2.0)
+                # ),
+                transforms.RandomHorizontalFlip(),
+                # transforms.RandomRotation(15),
+                # transforms.ColorJitter(
+                #     brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1
+                # ),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
+                ),
+            ]
+        ),
+        "test": transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
+                ),
+            ]
+        ),
+    }
+
+    loader = {}
+
+    if train:
+        train_dataset_full = datasets.CIFAR10(
+            root="./data", download=True, train=True, transform=transform["train"]
+        )
+        val_dataset_full = datasets.CIFAR10(
+            root="./data", download=True, train=True, transform=transform["test"]
+        )
+
+        full_size = len(train_dataset_full)
+        train_size = int(0.9 * full_size)
+        indices = list(range(full_size))
+        np.random.shuffle(indices)
+        train_idx = indices[:train_size]
+        val_idx = indices[train_size:]
+
+        train_dataset = Subset(train_dataset_full, train_idx)
+        val_dataset = Subset(val_dataset_full, val_idx)
+
+        train_loader = DataLoader(
+            train_dataset, batch_size=batch_size, shuffle=True, num_workers=4
+        )
+        val_loader = DataLoader(
+            val_dataset, batch_size=batch_size, shuffle=False, num_workers=4
+        )
+
+        loader["train"] = train_loader
+        loader["val"] = val_loader
+
+    if test:
+        test_dataset = datasets.CIFAR10(
+            root="./data", download=True, train=False, transform=transform["test"]
+        )
+        test_loader = DataLoader(
+            test_dataset, batch_size=batch_size, shuffle=False, num_workers=4
+        )
+
+        loader["test"] = test_loader
+
+    return loader
+
+
 # model
 class LinearClassifier(nn.Module):
     def __init__(self, c_in, c_out):
@@ -91,114 +198,8 @@ class CNN(nn.Module):
         return x
 
 
-# seed
-def set_seed(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-
-
-# argparse
-def get_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-m", "--model", type=str, default="fcnn", choices=["linear", "fcnn", "cnn"]
-    )
-    parser.add_argument(
-        "-o", "--optimizer", type=str, default="adamw", choices=["sgd", "adamw"]
-    )
-    parser.add_argument(
-        "-s", "--scheduler", type=str, default="cos", choices=["step", "cos", "cosine"]
-    )
-    parser.add_argument("-e", "--epochs", type=int, default=100)
-    parser.add_argument("-lr", "--lr", type=float, default=1e-3)
-    parser.add_argument("--train", action="store_true")
-    parser.add_argument("--test", action="store_true")
-    return parser.parse_args()
-
-
-# device
-def set_device():
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-    else:
-        device = torch.device("cpu")
-
-
-# data
-def data_process(train=False, test=False):
-    transform = {
-        "train": transforms.Compose(
-            [
-                transforms.RandomCrop((32, 32), padding=1),
-                transforms.RandomHorizontalFlip(),
-                # transforms.RandomRotation(15),
-                # transforms.ColorJitter(
-                #     brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1
-                # ),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
-                ),
-            ]
-        ),
-        "test": transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
-                ),
-            ]
-        ),
-    }
-
-    loader = {}
-
-    if train:
-        train_dataset_full = datasets.CIFAR10(
-            root="./data", download=True, train=True, transform=transform["train"]
-        )
-        val_dataset_full = datasets.CIFAR10(
-            root="./data", download=True, train=True, transform=transform["test"]
-        )
-
-        full_size = len(train_dataset_full)
-        train_size = int(0.9 * full_size)
-        indices = list(range(full_size))
-        np.random.shuffle(indices)
-        train_idx = indices[:train_size]
-        val_idx = indices[train_size:]
-
-        train_dataset = Subset(train_dataset_full, train_idx)
-        val_dataset = Subset(val_dataset_full, val_idx)
-
-        train_loader = DataLoader(
-            train_dataset, batch_size=batch_size, shuffle=True, num_workers=4
-        )
-        val_loader = DataLoader(
-            val_dataset, batch_size=batch_size, shuffle=False, num_workers=4
-        )
-
-        loader["train"] = train_loader
-        loader["val"] = val_loader
-
-    if test:
-        test_dataset = datasets.CIFAR10(
-            root="./data", download=True, train=False, transform=transform["test"]
-        )
-        test_loader = DataLoader(
-            test_dataset, batch_size=batch_size, shuffle=False, num_workers=4
-        )
-
-        loader["test"] = test_loader
-
-    return loader
-
-
-# model
-def set_model(name):
+def set_model(args):
+    name = args.model
     if name == "linear":
         model = LinearClassifier(in_channels * h * w, out_channels).to(device)
     elif name == "fcnn":
@@ -214,7 +215,8 @@ def set_model(name):
 
 
 # optimizer
-def set_optimizer(name):
+def set_optimizer(args):
+    name = args.optimizer
     if name == "sgd":
         optimizer = optim.SGD(
             model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4
@@ -226,11 +228,12 @@ def set_optimizer(name):
 
 
 # scheduler
-def set_scheduler(name, epochs):
+def set_scheduler(args):
+    name = args.scheduler
     if name == "step":
         scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
     else:
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     return scheduler
 
@@ -243,7 +246,7 @@ def train(model, optimizer, scheduler, args):
     epochs = args.epochs
 
     # data
-    loader = data_process(train=True)
+    loader = data_process(args.batch_size, train=True)
 
     # criterion
     criterion = nn.CrossEntropyLoss()
@@ -337,7 +340,7 @@ def test(model, args):
     print("\n----------Start Testing----------")
 
     # data
-    loader = data_process(test=True)
+    loader = data_process(args.batch_size, test=True)
 
     # load model
     ckpt_path = f"checkpoints/{args.model}_{args.optimizer}_{args.scheduler}_lr{args.lr}_epochs{args.epochs}.pt"
@@ -379,7 +382,6 @@ if __name__ == "__main__":
     h = w = 32
     hidden_channels = 1024
     out_channels = 10
-    batch_size = 128
 
     # seed
     set_seed(42)
@@ -391,15 +393,15 @@ if __name__ == "__main__":
     device = set_device()
 
     # model
-    model = set_model(args.model)
+    model = set_model(args)
 
     # train
     if args.train:
         # optimizer
-        optimizer = set_optimizer(args.optimizer)
+        optimizer = set_optimizer(args)
 
         # scheduler
-        scheduler = set_scheduler(args.scheduler, args.epochs)
+        scheduler = set_scheduler(args)
 
         train(model, optimizer, scheduler, args)
 
