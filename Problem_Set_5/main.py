@@ -12,7 +12,7 @@ import random
 
 
 # model
-class LinearModule(nn.Module):
+class LinearClassifier(nn.Module):
     def __init__(self, c_in, c_out):
         super().__init__()
 
@@ -91,26 +91,159 @@ class CNN(nn.Module):
         return x
 
 
-# train
-def train(args, model, device, train_loader, val_loader):
-    print("\n----------Start Training----------")
+# seed
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
 
-    # epochs
-    epochs = args.epochs
 
-    # optim
-    if args.optimizer == "sgd":
+# argparse
+def get_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-m", "--model", type=str, default="fcnn", choices=["linear", "fcnn", "cnn"]
+    )
+    parser.add_argument(
+        "-o", "--optimizer", type=str, default="adamw", choices=["sgd", "adamw"]
+    )
+    parser.add_argument(
+        "-s", "--scheduler", type=str, default="cos", choices=["step", "cos", "cosine"]
+    )
+    parser.add_argument("-e", "--epochs", type=int, default=100)
+    parser.add_argument("-lr", "--lr", type=float, default=1e-3)
+    parser.add_argument("--train", action="store_true")
+    parser.add_argument("--test", action="store_true")
+    return parser.parse_args()
+
+
+# device
+def set_device():
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+
+
+# data
+def data_process(train=False, test=False):
+    transform = {
+        "train": transforms.Compose(
+            [
+                transforms.RandomCrop((32, 32), padding=1),
+                transforms.RandomHorizontalFlip(),
+                # transforms.RandomRotation(15),
+                # transforms.ColorJitter(
+                #     brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1
+                # ),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
+                ),
+            ]
+        ),
+        "test": transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
+                ),
+            ]
+        ),
+    }
+
+    loader = {}
+
+    if train:
+        train_dataset_full = datasets.CIFAR10(
+            root="./data", download=True, train=True, transform=transform["train"]
+        )
+        val_dataset_full = datasets.CIFAR10(
+            root="./data", download=True, train=True, transform=transform["test"]
+        )
+
+        full_size = len(train_dataset_full)
+        train_size = int(0.9 * full_size)
+        indices = list(range(full_size))
+        np.random.shuffle(indices)
+        train_idx = indices[:train_size]
+        val_idx = indices[train_size:]
+
+        train_dataset = Subset(train_dataset_full, train_idx)
+        val_dataset = Subset(val_dataset_full, val_idx)
+
+        train_loader = DataLoader(
+            train_dataset, batch_size=batch_size, shuffle=True, num_workers=4
+        )
+        val_loader = DataLoader(
+            val_dataset, batch_size=batch_size, shuffle=False, num_workers=4
+        )
+
+        loader["train"] = train_loader
+        loader["val"] = val_loader
+
+    if test:
+        test_dataset = datasets.CIFAR10(
+            root="./data", download=True, train=False, transform=transform["test"]
+        )
+        test_loader = DataLoader(
+            test_dataset, batch_size=batch_size, shuffle=False, num_workers=4
+        )
+
+        loader["test"] = test_loader
+
+    return loader
+
+
+# model
+def set_model(name):
+    if name == "linear":
+        model = LinearClassifier(in_channels * h * w, out_channels).to(device)
+    elif name == "fcnn":
+        model = FCNN(in_channels * h * w, hidden_channels, out_channels).to(device)
+    else:
+        model = CNN(in_channels, out_channels).to(device)
+
+    print(
+        f"model={args.model}, optim={args.optimizer}, sched={args.scheduler}, lr={args.lr}, epochs={args.epochs}"
+    )
+
+    return model
+
+
+# optimizer
+def set_optimizer(name):
+    if name == "sgd":
         optimizer = optim.SGD(
             model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4
         )
     else:
         optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
 
-    # scheduler
-    if args.scheduler == "step":
-        sched = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
+    return optimizer
+
+
+# scheduler
+def set_scheduler(name, epochs):
+    if name == "step":
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
     else:
-        sched = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+
+    return scheduler
+
+
+# train
+def train(model, optimizer, scheduler, args):
+    print("\n----------Start Training----------")
+
+    # epochs
+    epochs = args.epochs
+
+    # data
+    loader = data_process(train=True)
 
     # criterion
     criterion = nn.CrossEntropyLoss()
@@ -137,7 +270,7 @@ def train(args, model, device, train_loader, val_loader):
 
             # train
             model.train()
-            for images, labels in train_loader:
+            for images, labels in loader["train"]:
                 # device
                 images = images.to(device)
                 labels = labels.to(device)
@@ -164,7 +297,7 @@ def train(args, model, device, train_loader, val_loader):
             # val
             with torch.no_grad():
                 model.eval()
-                for images, labels in val_loader:
+                for images, labels in loader["val"]:
                     images = images.to(device)
                     labels = labels.to(device)
                     output = model(images)
@@ -176,7 +309,7 @@ def train(args, model, device, train_loader, val_loader):
                     val_total += labels.shape[0]
 
             # scheduler
-            sched.step()
+            scheduler.step()
 
             # loss & acc
             train_loss /= train_total
@@ -200,8 +333,11 @@ def train(args, model, device, train_loader, val_loader):
 
 
 # test
-def test(args, model, device, test_loader):
+def test(model, args):
     print("\n----------Start Testing----------")
+
+    # data
+    loader = data_process(test=True)
 
     # load model
     ckpt_path = f"checkpoints/{args.model}_{args.optimizer}_{args.scheduler}_lr{args.lr}_epochs{args.epochs}.pt"
@@ -219,7 +355,7 @@ def test(args, model, device, test_loader):
 
     with torch.no_grad():
         model.eval()
-        for images, labels in test_loader:
+        for images, labels in loader["test"]:
             images = images.to(device)
             labels = labels.to(device)
             output = model(images)
@@ -245,108 +381,28 @@ if __name__ == "__main__":
     out_channels = 10
     batch_size = 128
 
-    seed = 42
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+    # seed
+    set_seed(42)
 
     # argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-m", "--model", type=str, default="fcnn", choices=["linear", "fcnn", "cnn"]
-    )
-    parser.add_argument(
-        "-o", "--optimizer", type=str, default="adamw", choices=["sgd", "adamw"]
-    )
-    parser.add_argument(
-        "-s", "--scheduler", type=str, default="cos", choices=["step", "cos", "cosine"]
-    )
-    parser.add_argument("-e", "--epochs", type=int, default=100)
-    parser.add_argument("-lr", "--lr", type=float, default=1e-3)
-    parser.add_argument("--train", action="store_true")
-    parser.add_argument("--test", action="store_true")
-    args = parser.parse_args()
+    args = get_args()
 
     # device
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-        torch.cuda.manual_seed(42)
-    else:
-        device = torch.device("cpu")
-
-    # data
-    transform = {
-        "train": transforms.Compose(
-            [
-                transforms.RandomCrop((32, 32), padding=1),
-                transforms.RandomHorizontalFlip(),
-                # transforms.RandomRotation(15),
-                # transforms.ColorJitter(
-                #     brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1
-                # ),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
-                ),
-            ]
-        ),
-        "test": transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
-                ),
-            ]
-        ),
-    }
+    device = set_device()
 
     # model
-    if args.model == "linear":
-        model = LinearModule(in_channels * h * w, out_channels).to(device)
-    elif args.model == "fcnn":
-        model = FCNN(in_channels * h * w, hidden_channels, out_channels).to(device)
-    else:
-        model = CNN(in_channels, out_channels).to(device)
-
-    print(
-        f"model={args.model}, optim={args.optimizer}, sched={args.scheduler}, lr={args.lr}, epochs={args.epochs}"
-    )
+    model = set_model(args.model)
 
     # train
     if args.train:
-        train_dataset_full = datasets.CIFAR10(
-            root="./data", download=True, train=True, transform=transform["train"]
-        )
-        val_dataset_full = datasets.CIFAR10(
-            root="./data", download=True, train=True, transform=transform["test"]
-        )
+        # optimizer
+        optimizer = set_optimizer(args.optimizer)
 
-        full_size = len(train_dataset_full)
-        train_size = int(0.9 * full_size)
-        indices = list(range(full_size))
-        np.random.shuffle(indices)
-        train_idx = indices[:train_size]
-        val_idx = indices[train_size:]
+        # scheduler
+        scheduler = set_scheduler(args.scheduler, args.epochs)
 
-        train_dataset = Subset(train_dataset_full, train_idx)
-        val_dataset = Subset(val_dataset_full, val_idx)
-
-        train_loader = DataLoader(
-            train_dataset, batch_size=batch_size, shuffle=True, num_workers=4
-        )
-        val_loader = DataLoader(
-            val_dataset, batch_size=batch_size, shuffle=False, num_workers=4
-        )
-
-        train(args, model, device, train_loader, val_loader)
+        train(model, optimizer, scheduler, args)
 
     # test
     if args.test:
-        test_dataset = datasets.CIFAR10(
-            root="./data", download=True, train=False, transform=transform["test"]
-        )
-        test_loader = DataLoader(
-            test_dataset, batch_size=batch_size, shuffle=False, num_workers=4
-        )
-
-        test(args, model, device, test_loader)
+        test(model, args)
