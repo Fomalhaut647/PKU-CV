@@ -212,5 +212,8 @@ pyrightconfig.json
 ### Custom ###
 test.py
 *.zip
-reference
+reference/
+reference.py
 report.md
+checkpoints/
+runs/
