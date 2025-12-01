@@ -51,15 +51,14 @@ def data_process(batch_size, train=False, test=False):
     transform = {
         "train": transforms.Compose(
             [
-                transforms.RandomCrop(size=(32, 32), padding=1),
-                # transforms.RandomResizedCrop(
-                #     size=(32, 32), scale=(0.8, 1.0), ratio=(0.5, 2.0)
-                # ),
+                transforms.RandomResizedCrop(
+                    size=(32, 32), scale=(0.6, 1.0), ratio=(0.5, 2.0)
+                ),
                 transforms.RandomHorizontalFlip(),
-                # transforms.RandomRotation(15),
-                # transforms.ColorJitter(
-                #     brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1
-                # ),
+                transforms.RandomRotation(15),
+                transforms.ColorJitter(
+                    brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1
+                ),
                 transforms.ToTensor(),
                 transforms.Normalize(
                     (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
