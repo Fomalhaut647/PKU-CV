@@ -40,6 +40,7 @@ class VGG(nn.Module):
         )
 
         self.flatten = nn.Flatten()
+        self.dropout = nn.Dropout()
         self.fc = nn.Linear(128 * 4 * 4, 10)
 
     def forward(self, x: torch.Tensor):
@@ -47,6 +48,7 @@ class VGG(nn.Module):
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.flatten(x)
+        x = self.dropout(x)
         out = self.fc(x)
         return out
 

@@ -176,7 +176,7 @@ def train(model, optimizer, scheduler, args):
     ckpt_path = f"checkpoints/{args.model}_{args.optimizer}_{args.scheduler}_lr{args.lr}_epochs{args.epochs}.pt"
     os.makedirs("checkpoints", exist_ok=True)
     best_acc = 0
-    global best_epoch
+    best_epoch = 0
 
     # tensorboard
     writer_name = f"runs/{args.model}_{args.optimizer}_{args.scheduler}_lr{args.lr}"
