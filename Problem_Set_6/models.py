@@ -186,13 +186,51 @@ class ResNextBlock(nn.Module):
 
         # 2. if in_channel != out_channel or stride != 1, deifine 1x1 convolution layer to change the channel or size.
 
+        hidden_channel = out_channel // bottle_neck
+
+        self.relu = nn.ReLU()
+        self.conv1 = nn.Conv2d(in_channel, hidden_channel, kernel_size=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(hidden_channel)
+
+        self.conv2 = nn.Conv2d(
+            hidden_channel,
+            hidden_channel,
+            kernel_size=3,
+            padding=1,
+            stride=stride,
+            groups=group,
+            bias=False,
+        )
+        self.bn2 = nn.BatchNorm2d(hidden_channel)
+
+        self.conv3 = nn.Conv2d(hidden_channel, out_channel, kernel_size=1, bias=False)
+        self.bn3 = nn.BatchNorm2d(out_channel)
+
+        if in_channel != out_channel or stride != 1:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(
+                    in_channel, out_channel, kernel_size=1, stride=stride, bias=False
+                ),
+                nn.BatchNorm2d(out_channel),
+            )
+        else:
+            self.shortcut = nn.Identity()
+
     def forward(self, x: torch.Tensor):
         # x: input image, shape: [B * C * H* W]
         # 1. convolve the input
         # 2. if in_channel != out_channel or stride != 1, change the channel or size of 'x' using 1x1 convolution.
         # 3. Add the output of the convolution and the original data (or from 2.)
         # 4. relu
-        return None
+
+        out = self.relu(self.bn1(self.conv1(x)))
+        out = self.relu(self.bn2(self.conv2(out)))
+        out = self.bn3(self.conv3(out))
+
+        out += self.shortcut(x)
+        out = self.relu(out)
+
+        return out
 
 
 class ResNext(nn.Module):
@@ -202,8 +240,52 @@ class ResNext(nn.Module):
         # 2. define multiple residual blocks
         # 3. define full-connected layer to classify
 
+        self.conv = nn.Conv2d(3, 32, kernel_size=3, padding=1, bias=False)
+        self.bn = nn.BatchNorm2d(32)
+        self.relu = nn.ReLU()
+
+        self.layer1 = nn.Sequential(
+            ResNextBlock(32, 64, bottle_neck=4, group=8, stride=2),
+            ResNextBlock(64, 64, bottle_neck=4, group=8, stride=1),
+        )
+
+        self.layer2 = nn.Sequential(
+            ResNextBlock(64, 128, bottle_neck=4, group=8, stride=2),
+            ResNextBlock(128, 128, bottle_neck=4, group=8, stride=1),
+        )
+
+        self.layer3 = nn.Sequential(
+            ResNextBlock(128, 256, bottle_neck=4, group=8, stride=2),
+            ResNextBlock(256, 256, bottle_neck=4, group=8, stride=1),
+            ResNextBlock(256, 256, bottle_neck=4, group=8, stride=1),
+        )
+
+        self.layer4 = nn.Sequential(
+            ResNextBlock(256, 512, bottle_neck=4, group=8, stride=2),
+            ResNextBlock(512, 512, bottle_neck=4, group=8, stride=1),
+            ResNextBlock(512, 512, bottle_neck=4, group=8, stride=1),
+        )
+
+        self.layer5 = nn.Sequential(
+            ResNextBlock(512, 1024, bottle_neck=4, group=8, stride=2),
+            ResNextBlock(1024, 1024, bottle_neck=4, group=8, stride=1),
+            ResNextBlock(1024, 1024, bottle_neck=4, group=8, stride=1),
+        )
+
+        self.avgpool = nn.AdaptiveAvgPool2d(1)
+        self.flatten = nn.Flatten()
+        self.fc = nn.Linear(1024, 10)
+
     def forward(self, x: torch.Tensor):
-        # x: input image, shape: [B * C * H* W]
+        # x: input image, shape: [B * C * H * W]
         # extract features
         # classification
-        return None
+
+        x = self.relu(self.bn(self.conv(x)))
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        x = self.layer5(x)
+        x = self.fc(self.flatten(self.avgpool(x)))
+        return x
