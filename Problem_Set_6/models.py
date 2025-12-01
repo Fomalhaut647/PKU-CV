@@ -54,7 +54,7 @@ class VGG(nn.Module):
 class ResBlock(nn.Module):
     """residual block"""
 
-    def __init__(self, in_channel, out_channel, stride):
+    def __init__(self, in_channel, out_channel, stride=1):
         super().__init__()
         """
         in_channel: number of channels in the input image.
@@ -67,16 +67,45 @@ class ResBlock(nn.Module):
         # activate function
         # ......
 
+        self.conv1 = nn.Conv2d(
+            in_channel, out_channel, kernel_size=3, stride=stride, padding=1, bias=False
+        )
+        self.bn1 = nn.BatchNorm2d(out_channel)
+        self.relu = nn.ReLU()
+
+        self.conv2 = nn.Conv2d(
+            out_channel, out_channel, kernel_size=3, stride=1, padding=1, bias=False
+        )
+        self.bn2 = nn.BatchNorm2d(out_channel)
+
         # 2. if in_channel != out_channel or stride != 1, deifine 1x1 convolution layer to change the channel or size.
 
-        # Note: we are going to implement 'Basic residual block' by above steps, you can also implement 'Bottleneck Residual block'
+        if in_channel != out_channel or stride != 1:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(
+                    in_channel,
+                    out_channel,
+                    kernel_size=3,
+                    stride=stride,
+                    padding=1,
+                    bias=False,
+                ),
+                nn.BatchNorm2d(out_channel),
+            )
+        else:
+            self.shortcut = nn.Identity()
 
     def forward(self, x: torch.Tensor):
-        # x: input image, shape: [B * C * H* W]
+        # x: input image, shape: [B * C * H * W]
         # 1. convolve the input
         # 2. if in_channel != out_channel or stride != 1, change the channel or size of 'x' using 1x1 convolution.
         # 3. Add the output of the convolution and the original data (or from 2.)
         # 4. relu
+        out = self.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out += self.shortcut(x)
+        out = self.relu(out)
+
         return out
 
 
@@ -90,10 +119,48 @@ class ResNet(nn.Module):
         # 2. define multiple residual blocks
         # 3. define full-connected layer to classify
 
+        self.conv = nn.Conv2d(3, 32, kernel_size=3, padding=1, bias=False)
+        self.bn = nn.BatchNorm2d(32)
+        self.relu = nn.ReLU()
+
+        self.layer1 = nn.Sequential(
+            ResBlock(32, 64, stride=2),
+            ResBlock(64, 64),
+        )
+
+        self.layer2 = nn.Sequential(
+            ResBlock(64, 128, stride=2),
+            ResBlock(128, 128),
+        )
+
+        self.layer3 = nn.Sequential(
+            ResBlock(128, 256, stride=2),
+            ResBlock(256, 256),
+        )
+
+        self.layer4 = nn.Sequential(
+            ResBlock(256, 512, stride=2),
+            ResBlock(512, 512),
+        )
+
+        self.avgpool = nn.AdaptiveAvgPool2d(1)
+        self.flatten = nn.Flatten()
+        self.fc = nn.Linear(512, 10)
+
     def forward(self, x: torch.Tensor):
         # x: input image, shape: [B * C * H* W]
         # extract features
         # classification
+
+        x = self.relu(self.bn(self.conv(x)))
+
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+
+        out = self.fc(self.flatten(self.avgpool(x)))
+
         return out
 
 
@@ -125,7 +192,7 @@ class ResNextBlock(nn.Module):
         # 2. if in_channel != out_channel or stride != 1, change the channel or size of 'x' using 1x1 convolution.
         # 3. Add the output of the convolution and the original data (or from 2.)
         # 4. relu
-        return out
+        return None
 
 
 class ResNext(nn.Module):
@@ -139,4 +206,4 @@ class ResNext(nn.Module):
         # x: input image, shape: [B * C * H* W]
         # extract features
         # classification
-        return out
+        return None
