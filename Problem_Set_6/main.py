@@ -176,6 +176,7 @@ def train(model, optimizer, scheduler, args):
     ckpt_path = f"checkpoints/{args.model}_{args.optimizer}_{args.scheduler}_lr{args.lr}_epochs{args.epochs}.pt"
     os.makedirs("checkpoints", exist_ok=True)
     best_acc = 0
+    global best_epoch
 
     # tensorboard
     writer_name = f"runs/{args.model}_{args.optimizer}_{args.scheduler}_lr{args.lr}"
@@ -250,8 +251,11 @@ def train(model, optimizer, scheduler, args):
             # checkpoint
             if val_acc > best_acc:
                 best_acc = val_acc
+                best_epoch = epoch
                 torch.save(model.state_dict(), ckpt_path)
                 # print(f"Model saved to {ckpt_path}")
+
+    print(f"\nBest Epoch: {best_epoch}    , Best  Acc: {best_acc:.2f}%")
 
     return
 

@@ -240,41 +240,64 @@ class ResNext(nn.Module):
         # 2. define multiple residual blocks
         # 3. define full-connected layer to classify
 
-        self.conv = nn.Conv2d(3, 32, kernel_size=3, padding=1, bias=False)
-        self.bn = nn.BatchNorm2d(32)
+        self.bottle_neck = 4
+        self.group = 4
+
+        self.conv = nn.Conv2d(3, 128, kernel_size=3, padding=1, bias=False)
+        self.bn = nn.BatchNorm2d(128)
         self.relu = nn.ReLU()
 
         self.layer1 = nn.Sequential(
-            ResNextBlock(32, 64, bottle_neck=4, group=8, stride=2),
-            ResNextBlock(64, 64, bottle_neck=4, group=8, stride=1),
+            ResNextBlock(
+                128, 256, bottle_neck=self.bottle_neck, group=self.group, stride=2
+            ),
+            ResNextBlock(
+                256, 256, bottle_neck=self.bottle_neck, group=self.group, stride=1
+            ),
+            ResNextBlock(
+                256, 256, bottle_neck=self.bottle_neck, group=self.group, stride=1
+            ),
         )
 
         self.layer2 = nn.Sequential(
-            ResNextBlock(64, 128, bottle_neck=4, group=8, stride=2),
-            ResNextBlock(128, 128, bottle_neck=4, group=8, stride=1),
+            ResNextBlock(
+                256, 512, bottle_neck=self.bottle_neck, group=self.group, stride=2
+            ),
+            ResNextBlock(
+                512, 512, bottle_neck=self.bottle_neck, group=self.group, stride=1
+            ),
+            ResNextBlock(
+                512, 512, bottle_neck=self.bottle_neck, group=self.group, stride=1
+            ),
         )
 
         self.layer3 = nn.Sequential(
-            ResNextBlock(128, 256, bottle_neck=4, group=8, stride=2),
-            ResNextBlock(256, 256, bottle_neck=4, group=8, stride=1),
-            ResNextBlock(256, 256, bottle_neck=4, group=8, stride=1),
+            ResNextBlock(
+                512, 1024, bottle_neck=self.bottle_neck, group=self.group, stride=2
+            ),
+            ResNextBlock(
+                1024, 1024, bottle_neck=self.bottle_neck, group=self.group, stride=1
+            ),
+            ResNextBlock(
+                1024, 1024, bottle_neck=self.bottle_neck, group=self.group, stride=1
+            ),
         )
 
         self.layer4 = nn.Sequential(
-            ResNextBlock(256, 512, bottle_neck=4, group=8, stride=2),
-            ResNextBlock(512, 512, bottle_neck=4, group=8, stride=1),
-            ResNextBlock(512, 512, bottle_neck=4, group=8, stride=1),
-        )
-
-        self.layer5 = nn.Sequential(
-            ResNextBlock(512, 1024, bottle_neck=4, group=8, stride=2),
-            ResNextBlock(1024, 1024, bottle_neck=4, group=8, stride=1),
-            ResNextBlock(1024, 1024, bottle_neck=4, group=8, stride=1),
+            ResNextBlock(
+                1024, 2048, bottle_neck=self.bottle_neck, group=self.group, stride=2
+            ),
+            ResNextBlock(
+                2048, 2048, bottle_neck=self.bottle_neck, group=self.group, stride=1
+            ),
+            ResNextBlock(
+                2048, 2048, bottle_neck=self.bottle_neck, group=self.group, stride=1
+            ),
         )
 
         self.avgpool = nn.AdaptiveAvgPool2d(1)
         self.flatten = nn.Flatten()
-        self.fc = nn.Linear(1024, 10)
+        self.fc = nn.Linear(2048, 10)
 
     def forward(self, x: torch.Tensor):
         # x: input image, shape: [B * C * H * W]
@@ -286,6 +309,5 @@ class ResNext(nn.Module):
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
-        x = self.layer5(x)
         x = self.fc(self.flatten(self.avgpool(x)))
         return x
